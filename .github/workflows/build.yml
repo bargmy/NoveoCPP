@@ -28,8 +28,9 @@ jobs:
       working-directory: .
       shell: bash
       run: |
-        # Add Qt MinGW to PATH (High Priority)
+        # Set Paths
         export PATH="${IQTA_TOOLS}/mingw810_64/bin:$PATH"
+        export PATH="${Qt5_Dir}/bin:$PATH"  # Add Qt Bin explicitly
         
         mkdir build && cd build
         
@@ -37,8 +38,11 @@ jobs:
         cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER="gcc.exe" -DCMAKE_CXX_COMPILER="g++.exe"
         cmake --build . --config Release
         
-        # Deploy Qt DLLs
-        windeployqt --release --no-translations --no-compiler-runtime --no-angle --no-opengl-sw NoveoDesktop.exe
+        echo "Build Complete. Running Deployment..."
+        
+        # Deploy Qt DLLs (simplified flags)
+        # We explicitly point to the qmake to ensure it finds plugins
+        windeployqt --release --no-translations --no-compiler-runtime NoveoDesktop.exe
         
         # Copy MinGW Runtime DLLs
         cp "${IQTA_TOOLS}/mingw810_64/bin/libgcc_s_seh-1.dll" .
