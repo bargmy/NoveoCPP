@@ -1,54 +1,83 @@
 name: Build Windows Release
 
+# Give the workflow permission to write tags/release content.
+# This plus repo settings (Actions permissions) allows GITHUB_TOKEN to push.
+permissions:
+  contents: write
+
 on:
   release:
     types: [published]
   workflow_dispatch:
 
 jobs:
-  version-bump:
-    if: github.event_name == 'workflow_dispatch'
+  # Prepare: determine version (on release use tag; on manual dispatch bump and push tag)
+  prepare:
     runs-on: ubuntu-latest
     outputs:
-      new_version: ${{ steps.tag.outputs.new_version }}
+      new_version: ${{ steps.setver.outputs.new_version }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Bump version and create tag
-        id: tag
+      - name: Determine or bump tag and push (if dispatch)
+        id: setver
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Preferred: create a secret REPO_PAT (personal access token with repo scope).
+          # If REPO_PAT is not provided, fall back to GITHUB_TOKEN (requires repo Actions perms).
+          AUTH_TOKEN: ${{ secrets.REPO_PAT != '' && secrets.REPO_PAT || secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
-          latest=$(git tag -l "v*" --sort=-v:refname | head -n 1)
-          if [ -z "$latest" ]; then
-            new="v1.0.0"
+          set -e
+          echo "GITHUB_EVENT_NAME=$GITHUB_EVENT_NAME"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "Manual dispatch -> bumping patch version and creating tag."
+            latest=$(git tag -l "v*" --sort=-v:refname | head -n 1)
+            if [ -z "$latest" ]; then
+              new="v1.0.0"
+            else
+              base=${latest#v}
+              major=${base%%.*}
+              rest=${base#*.}
+              minor=${rest%%.*}
+              patch=${rest##*.}
+              patch=$((patch + 1))
+              new="v$major.$minor.$patch"
+            fi
+            echo "New tag will be: $new"
+
+            # Configure git and push using AUTH_TOKEN
+            git config user.name "github-actions"
+            git config user.email "github-actions@github.com"
+
+            # Use token-authenticated remote so we can push.
+            git remote set-url origin https://$AUTH_TOKEN@github.com/$REPO.git
+
+            git tag "$new"
+            # push the tag
+            git push origin "$new"
+
+            echo "new_version=$new" >> $GITHUB_OUTPUT
           else
-            base=${latest#v}
-            major=${base%%.*}
-            rest=${base#*.}
-            minor=${rest%%.*}
-            patch=${rest##*.}
-            patch=$((patch + 1))
-            new="v$major.$minor.$patch"
+            # release event - use the tag that triggered the release
+            # GITHUB_REF looks like refs/tags/v1.0.2
+            refname=${GITHUB_REF##*/}
+            echo "Release event detected, using tag: $refname"
+            echo "new_version=$refname" >> $GITHUB_OUTPUT
           fi
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git remote set-url origin https://${GITHUB_TOKEN}@github.com/${{ github.repository }}.git
-          git tag "$new"
-          git push origin "$new"
-          echo "new_version=$new" >> $GITHUB_OUTPUT
 
   build-windows:
-    needs: version-bump
+    needs: prepare
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout (full)
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Install Qt
+      - name: Install Qt (MinGW 8.1.0)
         uses: jurplel/install-qt-action@v3
         with:
           version: '5.15.2'
@@ -61,36 +90,39 @@ jobs:
       - name: Build and Package
         shell: bash
         run: |
-          export QT_ROOT="$Qt5_Dir"
-          export MINGW_BIN="$IQTA_TOOLS/mingw810_64/bin"
+          set -e
+          export QT_ROOT="${Qt5_Dir}"
+          export MINGW_BIN="${IQTA_TOOLS}/mingw810_64/bin"
           export PATH="$MINGW_BIN:$QT_ROOT/bin:$PATH"
 
-          mkdir build && cd build
+          mkdir -p build && cd build
           cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
-          cmake --build .
+          cmake --build . --config Release
 
           echo "Running windeployqt..."
           "$QT_ROOT/bin/windeployqt.exe" --release --no-translations --no-compiler-runtime --dir . ./NoveoDesktop.exe || true
 
-          cp "$MINGW_BIN/libgcc_s_seh-1.dll" .
-          cp "$MINGW_BIN/libstdc++-6.dll" .
-          cp "$MINGW_BIN/libwinpthread-1.dll" .
+          echo "Copying MinGW runtime DLLs..."
+          cp "$MINGW_BIN/libgcc_s_seh-1.dll" . || true
+          cp "$MINGW_BIN/libstdc++-6.dll" . || true
+          cp "$MINGW_BIN/libwinpthread-1.dll" . || true
 
-          ZIP_NAME="NoveoDesktop-${{ needs.version-bump.outputs.new_version }}.zip"
+          VERSION=${{ needs.prepare.outputs.new_version }}
+          ZIP_NAME="NoveoDesktop-${VERSION}.zip"
+          echo "Creating $ZIP_NAME ..."
           7z a "$ZIP_NAME" * -xr!*.obj -xr!*.cpp -xr!*.h -xr!Makefile -xr!CMakeFiles -xr!*_autogen
 
-      - name: Upload Release ZIP
-        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+      - name: Upload ZIP to Release (create asset on that tag)
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ needs.version-bump.outputs.new_version }}
-          name: "NoveoDesktop Windows Release - ${{ needs.version-bump.outputs.new_version }}"
-          files: build/NoveoDesktop-${{ needs.version-bump.outputs.new_version }}.zip
+          tag_name: ${{ needs.prepare.outputs.new_version }}
+          name: "NoveoDesktop Windows Release - ${{ needs.prepare.outputs.new_version }}"
+          files: build/NoveoDesktop-${{ needs.prepare.outputs.new_version }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload Build Artifact
+      - name: Upload Build Artifact (fallback)
         uses: actions/upload-artifact@v4
         with:
-          name: NoveoDesktop-Windows
-          path: build/NoveoDesktop-${{ needs.version-bump.outputs.new_version }}.zip
+          name: NoveoDesktop-Windows-${{ needs.prepare.outputs.new_version }}
+          path: build/NoveoDesktop-${{ needs.prepare.outputs.new_version }}.zip
