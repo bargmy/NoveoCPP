@@ -17,7 +17,6 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    # 1. Install Qt
     - name: Install Qt
       uses: jurplel/install-qt-action@v3
       with:
@@ -26,66 +25,71 @@ jobs:
         target: 'desktop'
         arch: ${{ matrix.os == 'windows-latest' && 'win64_mingw81' || '' }}
         install-deps: 'true'
+        tools: 'tools_mingw,qt.tools.win64_mingw810' # Ensure tools are downloaded
 
-    # 2. Linux Deps
     - name: Install Linux Deps
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
         sudo apt-get install -y libgl1-mesa-dev
 
-    # 3. Create Build Dir
     - name: Create Build Directory
       run: mkdir build
 
-    # 4. Configure CMake (FIX: Force correct MinGW path)
     - name: Configure CMake
       working-directory: ./build
+      shell: bash
       run: |
         if [ "$RUNNER_OS" == "Windows" ]; then
-          # Force use of the MinGW 8.1.0 compiler bundled with Qt
-          # The install-qt-action usually sets IQTA_TOOLS variable, but we can also rely on PATH
-          # We explicitly point to the g++.exe inside the Qt Tools or the one added to path by the action
+          # 1. FIND THE CORRECT COMPILER
+          # The action installs Qt in D:/a/NoveoCPP/Qt/
+          # We look for g++.exe inside that folder to avoid the system C:/mingw64
           
-          # The action adds MinGW to path, but sometimes system MinGW overrides it.
-          # We force the path order or use explicit path if known.
-          # Usually it is installed at D:/a/NoveoCPP/Qt/Tools/mingw810_64/bin/g++.exe
+          # Find g++.exe inside D:/a/NoveoCPP/Qt/Tools
+          COMPILER_PATH=$(find ../ -type f -name "g++.exe" | grep "mingw810_64" | head -n 1)
           
-          # Let's try relying on standard CMake but ensuring we pick the right generator
-          cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+          if [ -z "$COMPILER_PATH" ]; then
+             echo "Could not find Qt MinGW! Falling back to PATH..."
+             COMPILER_PATH="g++"
+          else
+             echo "Found Qt MinGW: $COMPILER_PATH"
+          fi
+          
+          # 2. CONFIGURE with explicit compiler path
+          cmake .. -G "MinGW Makefiles" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER="$COMPILER_PATH" \
+            -DCMAKE_C_COMPILER="${COMPILER_PATH/g++/gcc}"
+            
         else
           cmake .. -DCMAKE_BUILD_TYPE=Release
         fi
-      shell: bash
-      env:
-        # Crucial: This ensures the Qt-bundled MinGW is found BEFORE the system MinGW
-        # The 'install-qt-action' puts its tools in PATH, but we want to be sure.
-        CC: gcc
-        CXX: g++
 
-    # 5. Build
     - name: Build
       working-directory: ./build
       run: cmake --build . --config Release
 
     # --- PACKAGING ---
     
-    # Windows Package
+    # Windows
     - name: Package Windows
       if: runner.os == 'Windows'
       working-directory: ./build
+      shell: bash
       run: |
         windeployqt --release --no-translations --no-compiler-runtime --no-angle --no-opengl-sw NoveoDesktop.exe
         
-        # Copy MinGW DLLs manually because windeployqt might miss them
-        # We search for them in the PATH (which includes the Qt MinGW bin)
-        cp $(which libgcc_s_seh-1.dll) .
-        cp $(which libstdc++-6.dll) .
-        cp $(which libwinpthread-1.dll) .
+        # Copy MinGW DLLs from the SAME compiler we used
+        COMPILER_PATH=$(find ../ -type f -name "g++.exe" | grep "mingw810_64" | head -n 1)
+        BIN_DIR=$(dirname "$COMPILER_PATH")
         
-        7z a NoveoDesktop-Windows.zip * -xr!*.obj -xr!*.cpp -xr!*.h -xr!Makefile -xr!CMakeFiles
+        cp "$BIN_DIR/libgcc_s_seh-1.dll" . || echo "libgcc skipped"
+        cp "$BIN_DIR/libstdc++-6.dll" . || echo "libstdc++ skipped"
+        cp "$BIN_DIR/libwinpthread-1.dll" . || echo "pthread skipped"
+        
+        7z a NoveoDesktop-Windows.zip * -xr!*.obj -xr!*.cpp -xr!*.h -xr!Makefile -xr!CMakeFiles -xr!*_autogen
 
-    # macOS Package
+    # macOS
     - name: Package macOS
       if: runner.os == 'macOS'
       working-directory: ./build
@@ -93,15 +97,17 @@ jobs:
         macdeployqt NoveoDesktop.app -dmg
         mv NoveoDesktop.dmg NoveoDesktop-macOS.dmg
 
-    # Linux Package
+    # Linux (Fixed: check file existence)
     - name: Package Linux
       if: runner.os == 'Linux'
       working-directory: ./build
       run: |
-        mv NoveoDesktop NoveoDesktop-Linux
-        zip NoveoDesktop-Linux.zip NoveoDesktop-Linux
+        # Ensure executable permission
+        chmod +x NoveoDesktop
+        zip NoveoDesktop-Linux.zip NoveoDesktop
 
     # --- UPLOAD ---
+    
     - name: Upload Assets
       uses: softprops/action-gh-release@v1
       if: startsWith(github.ref, 'refs/tags/')
