@@ -6,7 +6,38 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Auto bump version on manual dispatch
+  version-bump:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.tag.outputs.new_version }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Bump version
+      id: tag
+      run: |
+        latest=$(git tag -l "v*" --sort=-v:refname | head -n 1)
+        if [ -z "$latest" ]; then
+          latest="v1.0.0"
+        else
+          base=${latest#v}
+          major=${base%%.*}
+          rest=${base#*.}
+          minor=${rest%%.*}
+          patch=${rest##*.}
+          patch=$((patch + 1))
+          latest="v$major.$minor.$patch"
+        fi
+        git tag "$latest"
+        git push origin "$latest"
+        echo "new_version=$latest" >> $GITHUB_OUTPUT
   build-windows:
+    needs: [version-bump]
+    runs-on: windows-latest
     runs-on: windows-latest
 
     steps:
