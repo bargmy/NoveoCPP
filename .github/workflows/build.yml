@@ -1,11 +1,88 @@
+name: Build Windows Release
+
+# Allow write access to contents (releases, assets). Also ensure repo Actions permissions allow write if using GITHUB_TOKEN.
+permissions:
+  contents: write
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  prepare:
+    # Runs on both release events and manual dispatches.
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.setver.outputs.new_version }}
+    steps:
+      - name: Checkout (full)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine or bump tag and push (if dispatch)
+        id: setver
+        env:
+          REPO: ${{ github.repository }}
+          # Optional: set a secret REPO_PAT for reliable push permissions (preferred).
+          REPO_PAT: ${{ secrets.REPO_PAT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          echo "event: $GITHUB_EVENT_NAME"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "Manual dispatch -> bumping patch version and creating tag."
+
+            latest=$(git tag -l "v*" --sort=-v:refname | head -n 1)
+            if [ -z "$latest" ]; then
+              new="v1.0.0"
+            else
+              base=${latest#v}
+              major=${base%%.*}
+              rest=${base#*.}
+              minor=${rest%%.*}
+              patch=${rest##*.}
+              patch=$((patch + 1))
+              new="v$major.$minor.$patch"
+            fi
+            echo "New tag will be: $new"
+
+            # Choose auth token
+            if [ -n "$REPO_PAT" ]; then
+              AUTH_TOKEN="$REPO_PAT"
+              echo "Using REPO_PAT secret for pushing."
+            else
+              AUTH_TOKEN="$GITHUB_TOKEN"
+              echo "Using GITHUB_TOKEN for pushing (requires repo Actions permission: Read & write)."
+            fi
+
+            git config user.name "github-actions"
+            git config user.email "github-actions@github.com"
+
+            # Use token-authenticated remote so we can push tags
+            git remote set-url origin https://${AUTH_TOKEN}@github.com/${REPO}.git
+
+            git tag "$new"
+            git push origin "$new"
+
+            echo "new_version=$new" >> $GITHUB_OUTPUT
+          else
+            # release event -> use tag from the event (GITHUB_REF = refs/tags/<tag>)
+            refname=${GITHUB_REF##*/}
+            echo "Release event detected, using tag: $refname"
+            echo "new_version=$refname" >> $GITHUB_OUTPUT
+          fi
+
   build-windows:
     needs: prepare
     runs-on: windows-latest
     steps:
-      - name: Checkout
+      - name: Checkout the tag
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # Check out the tag created/selected by `prepare`
           ref: ${{ needs.prepare.outputs.new_version }}
 
       - name: Install Qt (MinGW 8.1.0)
@@ -18,13 +95,16 @@
           install-deps: 'true'
           tools: 'tools_mingw,qt.tools.win64_mingw810'
 
-      - name: Build and Package
+      - name: Build and Package (MinGW)
         shell: bash
         env:
           QT_ROOT: ${{ env.Qt5_Dir }}
           MINGW_BIN: ${{ env.IQTA_TOOLS }}/mingw810_64/bin
         run: |
           set -e
+          echo "Qt5_Dir = ${Qt5_Dir}"
+          echo "IQTA_TOOLS = ${IQTA_TOOLS}"
+          export QT_ROOT="${Qt5_Dir}"
           export MINGW_BIN="${IQTA_TOOLS}/mingw810_64/bin"
           export PATH="$MINGW_BIN:$QT_ROOT/bin:$PATH"
           export QT_PLUGIN_PATH="${QT_ROOT}/plugins"
@@ -34,44 +114,79 @@
 
           echo "Configuring project..."
           cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+          echo "Building..."
           cmake --build . --config Release
 
-          echo "Running windeployqt..."
+          echo "Running windeployqt (will copy Qt DLLs & plugins)..."
+          # Use full path to windeployqt.exe
           "$QT_ROOT/bin/windeployqt.exe" --release --no-translations --no-compiler-runtime --dir . ./NoveoDesktop.exe || true
 
-          # --- FIX: DOWNLOAD OPENSSL FROM YOUR SERVER ---
-          echo "Downloading OpenSSL binaries from hienob.bargmy.ir..."
+          # --- FIX: DOWNLOAD INDIVIDUAL OPENSSL DLLs FROM YOUR SERVER ---
+          echo "Downloading OpenSSL DLLs from hienob.bargmy.ir..."
           
-          # Assuming the URL returns a ZIP file containing the DLLs
-          curl -L -o openssl_libs.zip http://hienob.bargmy.ir/openssl
+          # Download libssl
+          curl -L -o libssl-1_1-x64.dll http://hienob.bargmy.ir/openssl/libssl-1_1-x64.dll
           
-          # Extract the ZIP. We use -j to flatten directories just in case they are in a subfolder.
-          # We explicitly look for the required DLLs.
-          unzip -j openssl_libs.zip "libssl-1_1-x64.dll" "libcrypto-1_1-x64.dll"
+          # Download libcrypto
+          curl -L -o libcrypto-1_1-x64.dll http://hienob.bargmy.ir/openssl/libcrypto-1_1-x64.dll
           
-          # Verify files exist
-          if [ ! -f "libssl-1_1-x64.dll" ] || [ ! -f "libcrypto-1_1-x64.dll" ]; then
-             echo "ERROR: OpenSSL DLLs failed to download or extract from your server."
-             echo "Please ensure http://hienob.bargmy.ir/openssl is a direct link to a ZIP file containing libssl-1_1-x64.dll and libcrypto-1_1-x64.dll"
+          # Verify files exist and have size > 0
+          if [ ! -s "libssl-1_1-x64.dll" ] || [ ! -s "libcrypto-1_1-x64.dll" ]; then
+             echo "ERROR: OpenSSL DLLs failed to download (empty or missing)."
+             ls -l *.dll
              exit 1
           fi
+          
+          echo "OpenSSL Download Successful."
           # --- FIX END ---
 
-          # Copy MinGW runtimes
+          # Fallback: ensure core Qt DLLs are present (sometimes windeployqt misses due to env)
+          for dll in Qt5Core.dll Qt5Gui.dll Qt5Network.dll Qt5WebSockets.dll Qt5Widgets.dll; do
+            if [ ! -f "$dll" ]; then
+              if [ -f "$QT_ROOT/bin/$dll" ]; then
+                echo "Copying $dll from Qt bin"
+                cp "$QT_ROOT/bin/$dll" .
+              else
+                echo "Warning: $dll not found in target dir nor in $QT_ROOT/bin"
+              fi
+            fi
+          done
+
+          # Ensure platform plugin is present
+          if [ ! -d "platforms" ] || [ ! -f "platforms/qwindows.dll" ]; then
+            echo "platforms/qwindows.dll missing -> attempting to copy"
+            mkdir -p platforms
+            if [ -f "$QT_ROOT/plugins/platforms/qwindows.dll" ]; then
+              cp "$QT_ROOT/plugins/platforms/qwindows.dll" platforms/
+            else
+              echo "Warning: qwindows.dll not found at $QT_ROOT/plugins/platforms"
+            fi
+          fi
+
+          # Copy MinGW runtimes as before
+          echo "Copying MinGW runtimes..."
           cp "$MINGW_BIN/libgcc_s_seh-1.dll" . || true
           cp "$MINGW_BIN/libstdc++-6.dll" . || true
           cp "$MINGW_BIN/libwinpthread-1.dll" . || true
 
-          # Create ZIP
           VERSION=${{ needs.prepare.outputs.new_version }}
           ZIP_NAME="NoveoDesktop-${VERSION}.zip"
-          echo "Zipping to $ZIP_NAME..."
+
+          echo "Creating ZIP: $ZIP_NAME"
+          # 7z is available on Windows runner images
           7z a "$ZIP_NAME" * -xr!*.obj -xr!*.cpp -xr!*.h -xr!Makefile -xr!CMakeFiles -xr!*_autogen
 
-      - name: Upload Release Asset
+      - name: Upload ZIP to Release (create/update asset)
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ needs.prepare.outputs.new_version }}
+          name: "NoveoDesktop Windows Release - ${{ needs.prepare.outputs.new_version }}"
           files: build/NoveoDesktop-${{ needs.prepare.outputs.new_version }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Build Artifact (fallback)
+        uses: actions/upload-artifact@v4
+        with:
+          name: NoveoDesktop-Windows-${{ needs.prepare.outputs.new_version }}
+          path: build/NoveoDesktop-${{ needs.prepare.outputs.new_version }}.zip
