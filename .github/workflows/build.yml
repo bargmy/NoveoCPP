@@ -1,4 +1,4 @@
-name: Build and Release
+name: Build Windows Release
 
 on:
   release:
@@ -6,111 +6,53 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
-    name: Build on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
-
+  build-windows:
+    runs-on: windows-latest
+    
     steps:
     - uses: actions/checkout@v4
 
-    # 1. Install Qt
+    # 1. Install Qt (MinGW 8.1.0)
     - name: Install Qt
       uses: jurplel/install-qt-action@v3
       with:
         version: '5.15.2'
-        host: ${{ matrix.os == 'windows-latest' && 'windows' || matrix.os == 'macos-latest' && 'mac' || 'linux' }}
+        host: 'windows'
         target: 'desktop'
-        arch: ${{ matrix.os == 'windows-latest' && 'win64_mingw81' || '' }}
+        arch: 'win64_mingw81'
         install-deps: 'true'
         tools: 'tools_mingw,qt.tools.win64_mingw810'
 
-    # 2. Linux Dependencies
-    - name: Install Linux Deps
-      if: runner.os == 'Linux'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y libgl1-mesa-dev
-
-    # 3. Create Build Directory
-    - name: Create Build Directory
-      run: mkdir build
-
-    # 4. Configure CMake (Robust Windows Fix)
-    - name: Configure CMake
-      working-directory: ./build
+    # 2. Build & Package
+    - name: Build and Package
+      working-directory: .
       shell: bash
       run: |
-        if [ "$RUNNER_OS" == "Windows" ]; then
-          # Manually add the Qt-bundled MinGW to the front of the PATH
-          # IQTA_TOOLS is set by install-qt-action, usually D:\a\NoveoCPP\Qt\Tools
-          # The compiler is in mingw810_64\bin
-          
-          MINGW_BIN="${IQTA_TOOLS}/mingw810_64/bin"
-          echo "Adding MinGW to PATH: $MINGW_BIN"
-          export PATH="$MINGW_BIN:$PATH"
-          
-          # Force CMake to use this gcc/g++
-          cmake .. -G "MinGW Makefiles" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_COMPILER="gcc.exe" \
-            -DCMAKE_CXX_COMPILER="g++.exe"
-        else
-          cmake .. -DCMAKE_BUILD_TYPE=Release
-        fi
-
-    # 5. Build
-    - name: Build
-      working-directory: ./build
-      run: cmake --build . --config Release
-
-    # --- PACKAGING ---
-    
-    # Windows
-    - name: Package Windows
-      if: runner.os == 'Windows'
-      working-directory: ./build
-      shell: bash
-      run: |
-        # Add MinGW to PATH again for this step to find dlls
+        # Add Qt MinGW to PATH (High Priority)
         export PATH="${IQTA_TOOLS}/mingw810_64/bin:$PATH"
         
+        mkdir build && cd build
+        
+        # Configure & Build
+        cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER="gcc.exe" -DCMAKE_CXX_COMPILER="g++.exe"
+        cmake --build . --config Release
+        
+        # Deploy Qt DLLs
         windeployqt --release --no-translations --no-compiler-runtime --no-angle --no-opengl-sw NoveoDesktop.exe
         
-        # Manually copy MinGW runtime DLLs
-        cp "${IQTA_TOOLS}/mingw810_64/bin/libgcc_s_seh-1.dll" . || echo "libgcc not found"
-        cp "${IQTA_TOOLS}/mingw810_64/bin/libstdc++-6.dll" . || echo "libstdc++ not found"
-        cp "${IQTA_TOOLS}/mingw810_64/bin/libwinpthread-1.dll" . || echo "pthread not found"
+        # Copy MinGW Runtime DLLs
+        cp "${IQTA_TOOLS}/mingw810_64/bin/libgcc_s_seh-1.dll" .
+        cp "${IQTA_TOOLS}/mingw810_64/bin/libstdc++-6.dll" .
+        cp "${IQTA_TOOLS}/mingw810_64/bin/libwinpthread-1.dll" .
         
+        # Zip everything
         7z a NoveoDesktop-Windows.zip * -xr!*.obj -xr!*.cpp -xr!*.h -xr!Makefile -xr!CMakeFiles -xr!*_autogen
 
-    # macOS
-    - name: Package macOS
-      if: runner.os == 'macOS'
-      working-directory: ./build
-      run: |
-        macdeployqt NoveoDesktop.app -dmg
-        mv NoveoDesktop.dmg NoveoDesktop-macOS.dmg
-
-    # Linux
-    - name: Package Linux
-      if: runner.os == 'Linux'
-      working-directory: ./build
-      run: |
-        chmod +x NoveoDesktop
-        zip NoveoDesktop-Linux.zip NoveoDesktop
-
-    # --- UPLOAD ---
-    - name: Upload Assets
+    # 3. Upload to Release
+    - name: Upload Asset
       uses: softprops/action-gh-release@v1
       if: startsWith(github.ref, 'refs/tags/')
       with:
-        files: |
-          build/NoveoDesktop-Windows.zip
-          build/NoveoDesktop-macOS.dmg
-          build/NoveoDesktop-Linux.zip
+        files: build/NoveoDesktop-Windows.zip
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
