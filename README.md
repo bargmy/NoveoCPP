@@ -1,2 +1,2 @@
-# NoveoCPP
-Noveo Desktop CPP Clients 
+# Noveo Desktop
+Noveo CPP Client for Desktop. Windows only for now
