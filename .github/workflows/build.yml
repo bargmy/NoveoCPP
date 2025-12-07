@@ -45,10 +45,12 @@ jobs:
 
         7z a NoveoDesktop-Windows.zip * -xr!*.obj -xr!*.cpp -xr!*.h -xr!Makefile -xr!CMakeFiles -xr!*_autogen
 
-    - name: Upload Asset
+        # Upload as release asset always when build succeeds
+    - name: Upload Release ZIP
       uses: softprops/action-gh-release@v1
-      if: startsWith(github.ref, 'refs/tags/')
       with:
+        tag_name: ${{ github.ref_name }}
+        name: "NoveoDesktop Windows Release - ${{ github.ref_name }}"
         files: build/NoveoDesktop-Windows.zip
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
