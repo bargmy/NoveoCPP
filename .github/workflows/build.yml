@@ -17,43 +17,54 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    # Fix: Map runner OS names to valid Qt host names
+    # --- SETUP QT (Explicit MinGW for Windows) ---
     - name: Install Qt
       uses: jurplel/install-qt-action@v3
       with:
         version: '5.15.2'
-        # The 'host' parameter must be 'windows', 'linux', or 'mac'
         host: ${{ matrix.os == 'windows-latest' && 'windows' || matrix.os == 'macos-latest' && 'mac' || 'linux' }}
         target: 'desktop'
+        # Crucial: Install MinGW toolchain for Windows
         arch: ${{ matrix.os == 'windows-latest' && 'win64_mingw81' || '' }}
         install-deps: 'true'
 
+    # --- LINUX DEPS ---
     - name: Install Linux Deps
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
         sudo apt-get install -y libgl1-mesa-dev
 
+    # --- CONFIGURE (Force MinGW on Windows) ---
     - name: Create Build Directory
       run: mkdir build
 
     - name: Configure CMake
       working-directory: ./build
-      run: cmake .. -DCMAKE_BUILD_TYPE=Release
+      run: |
+        if [ "$RUNNER_OS" == "Windows" ]; then
+          cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc
+        else
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+        fi
+      shell: bash
 
+    # --- BUILD ---
     - name: Build
       working-directory: ./build
       run: cmake --build . --config Release
 
     # --- PACKAGING ---
     
+    # Windows Package
     - name: Package Windows
       if: runner.os == 'Windows'
       working-directory: ./build
       run: |
-        windeployqt --release --no-translations --no-compiler-runtime NoveoDesktop.exe
+        windeployqt --release --no-translations --no-compiler-runtime --no-angle --no-opengl-sw NoveoDesktop.exe
         7z a NoveoDesktop-Windows.zip * -xr!*.obj -xr!*.cpp -xr!*.h -xr!Makefile -xr!CMakeFiles
 
+    # macOS Package
     - name: Package macOS
       if: runner.os == 'macOS'
       working-directory: ./build
@@ -61,6 +72,7 @@ jobs:
         macdeployqt NoveoDesktop.app -dmg
         mv NoveoDesktop.dmg NoveoDesktop-macOS.dmg
 
+    # Linux Package
     - name: Package Linux
       if: runner.os == 'Linux'
       working-directory: ./build
@@ -68,8 +80,7 @@ jobs:
         mv NoveoDesktop NoveoDesktop-Linux
         zip NoveoDesktop-Linux.zip NoveoDesktop-Linux
 
-    # --- UPLOAD TO RELEASE ---
-    
+    # --- UPLOAD ---
     - name: Upload Assets
       uses: softprops/action-gh-release@v1
       if: startsWith(github.ref, 'refs/tags/')
