@@ -28,28 +28,46 @@ jobs:
       working-directory: .
       shell: bash
       run: |
-        # Set Paths
-        export PATH="${IQTA_TOOLS}/mingw810_64/bin:$PATH"
-        export PATH="${Qt5_Dir}/bin:$PATH"  # Add Qt Bin explicitly
+        # --- SETUP PATHS ---
+        # The Qt Action sets 'Qt5_Dir', we use it to find bins and plugins
+        export QT_ROOT="${Qt5_Dir}"
+        export QT_BIN="${QT_ROOT}/bin"
+        export QT_PLUGINS="${QT_ROOT}/plugins"
+        export MINGW_BIN="${IQTA_TOOLS}/mingw810_64/bin"
         
+        # Add MinGW and Qt Bin to PATH so CMake and Windeployqt work
+        export PATH="$MINGW_BIN:$QT_BIN:$PATH"
+        
+        # CRITICAL FIX: Tell windeployqt where the plugins are
+        export QT_PLUGIN_PATH="$QT_PLUGINS"
+
+        echo "Qt Root: $QT_ROOT"
+        echo "Plugin Path: $QT_PLUGIN_PATH"
+
+        # --- BUILD ---
         mkdir build && cd build
         
-        # Configure & Build
-        cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER="gcc.exe" -DCMAKE_CXX_COMPILER="g++.exe"
+        # Force MinGW Generator and Compiler
+        cmake .. -G "MinGW Makefiles" \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_C_COMPILER="gcc.exe" \
+          -DCMAKE_CXX_COMPILER="g++.exe"
+          
         cmake --build . --config Release
         
-        echo "Build Complete. Running Deployment..."
+        # --- DEPLOY ---
+        echo "Running windeployqt..."
+        # --dir . tells it to dump dlls right here
+        windeployqt --release --no-translations --no-compiler-runtime --dir . NoveoDesktop.exe
         
-        # Deploy Qt DLLs (simplified flags)
-        # We explicitly point to the qmake to ensure it finds plugins
-        windeployqt --release --no-translations --no-compiler-runtime NoveoDesktop.exe
+        # --- MANUAL COPY (MinGW System DLLs) ---
+        echo "Copying MinGW Runtime DLLs..."
+        cp "$MINGW_BIN/libgcc_s_seh-1.dll" .
+        cp "$MINGW_BIN/libstdc++-6.dll" .
+        cp "$MINGW_BIN/libwinpthread-1.dll" .
         
-        # Copy MinGW Runtime DLLs
-        cp "${IQTA_TOOLS}/mingw810_64/bin/libgcc_s_seh-1.dll" .
-        cp "${IQTA_TOOLS}/mingw810_64/bin/libstdc++-6.dll" .
-        cp "${IQTA_TOOLS}/mingw810_64/bin/libwinpthread-1.dll" .
-        
-        # Zip everything
+        # --- ZIP ---
+        echo "Zipping..."
         7z a NoveoDesktop-Windows.zip * -xr!*.obj -xr!*.cpp -xr!*.h -xr!Makefile -xr!CMakeFiles -xr!*_autogen
 
     # 3. Upload to Release
