@@ -1,49 +1,3 @@
-name: Build Windows Release
-
-permissions:
-  contents: write
-
-on:
-  release:
-    types: [published]
-  workflow_dispatch:
-
-jobs:
-  prepare:
-    runs-on: ubuntu-latest
-    outputs:
-      new_version: ${{ steps.setver.outputs.new_version }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Determine version
-        id: setver
-        env:
-          REPO: ${{ github.repository }}
-          REPO_PAT: ${{ secrets.REPO_PAT }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -e
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            latest=$(git tag -l "v*" --sort=-v:refname | head -n 1)
-            if [ -z "$latest" ]; then new="v1.0.0"; else
-              base=${latest#v}; major=${base%%.*}; rest=${base#*.}; minor=${rest%%.*}; patch=${rest##*.}
-              patch=$((patch + 1)); new="v$major.$minor.$patch"
-            fi
-            echo "new_version=$new" >> $GITHUB_OUTPUT
-            if [ -n "$REPO_PAT" ]; then AUTH="$REPO_PAT"; else AUTH="$GITHUB_TOKEN"; fi
-            git config user.name "github-actions"
-            git config user.email "github-actions@github.com"
-            git remote set-url origin https://${AUTH}@github.com/${REPO}.git
-            git tag "$new"
-            git push origin "$new"
-          else
-            echo "new_version=${GITHUB_REF##*/}" >> $GITHUB_OUTPUT
-          fi
-
   build-windows:
     needs: prepare
     runs-on: windows-latest
@@ -62,21 +16,7 @@ jobs:
           target: 'desktop'
           arch: 'win64_mingw81'
           install-deps: 'true'
-          # We only install the compiler here. OpenSSL is handled manually below.
           tools: 'tools_mingw,qt.tools.win64_mingw810'
-
-      - name: Download OpenSSL 1.1.1 (Qt Package)
-        shell: bash
-        run: |
-          # Directly download the OpenSSL 1.1.1 binaries from Qt's official repo
-          # This bypasses 'aqt' metadata errors and 'choco' path issues.
-          echo "Downloading OpenSSL..."
-          curl -L -o openssl.7z https://download.qt.io/online/qtsdkrepository/windows_x86/desktop/tools_openssl/qt.tools.openssl.win_x64/1.1.1.k-2/qt.tools.openssl.win_x64.7z
-          
-          # Extract using 7zip (pre-installed on windows-latest)
-          7z x openssl.7z -oopenssl_libs
-          
-          echo "OpenSSL extracted to openssl_libs"
 
       - name: Build and Package
         shell: bash
@@ -89,47 +29,33 @@ jobs:
           export PATH="$MINGW_BIN:$QT_ROOT/bin:$PATH"
           export QT_PLUGIN_PATH="${QT_ROOT}/plugins"
 
-          mkdir -p build && cd build
+          mkdir -p build
+          cd build
 
           echo "Configuring project..."
           cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
           cmake --build . --config Release
 
           echo "Running windeployqt..."
-          # The "Unable to find the platform plugin" error is common in CI. 
-          # We force the plugin path and ignore the exit code because we manually verify/copy plugins later.
-          "$QT_ROOT/bin/windeployqt.exe" --release --no-translations --no-compiler-runtime --plugindir "$QT_ROOT/plugins" --dir . ./NoveoDesktop.exe || true
+          "$QT_ROOT/bin/windeployqt.exe" --release --no-translations --no-compiler-runtime --dir . ./NoveoDesktop.exe || true
 
-          # --- FIX: Copy OpenSSL DLLs from our manual download ---
-          echo "Copying OpenSSL DLLs..."
-          # The structure inside the 7z is usually Tools/OpenSSL/Win_x64/bin
-          OPENSSL_SRC="../openssl_libs/Tools/OpenSSL/Win_x64/bin"
+          # --- FIX: DOWNLOAD OPENSSL FROM YOUR SERVER ---
+          echo "Downloading OpenSSL binaries from hienob.bargmy.ir..."
           
-          cp "$OPENSSL_SRC/libssl-1_1-x64.dll" .
-          cp "$OPENSSL_SRC/libcrypto-1_1-x64.dll" .
-
-          # Verify they were copied
-          if [ ! -f "libssl-1_1-x64.dll" ]; then echo "ERROR: libssl-1_1-x64.dll missing"; exit 1; fi
-          # --- FIX END ---
-
-          # Fallback: ensure core Qt DLLs are present (sometimes windeployqt misses due to env)
-          for dll in Qt5Core.dll Qt5Gui.dll Qt5Network.dll Qt5WebSockets.dll Qt5Widgets.dll; do
-            if [ ! -f "$dll" ]; then
-              if [ -f "$QT_ROOT/bin/$dll" ]; then
-                echo "Copying $dll from Qt bin"
-                cp "$QT_ROOT/bin/$dll" .
-              fi
-            fi
-          done
-
-          # Ensure platform plugin is present
-          if [ ! -d "platforms" ] || [ ! -f "platforms/qwindows.dll" ]; then
-            echo "platforms/qwindows.dll missing -> attempting to copy"
-            mkdir -p platforms
-            if [ -f "$QT_ROOT/plugins/platforms/qwindows.dll" ]; then
-              cp "$QT_ROOT/plugins/platforms/qwindows.dll" platforms/
-            fi
+          # Assuming the URL returns a ZIP file containing the DLLs
+          curl -L -o openssl_libs.zip http://hienob.bargmy.ir/openssl
+          
+          # Extract the ZIP. We use -j to flatten directories just in case they are in a subfolder.
+          # We explicitly look for the required DLLs.
+          unzip -j openssl_libs.zip "libssl-1_1-x64.dll" "libcrypto-1_1-x64.dll"
+          
+          # Verify files exist
+          if [ ! -f "libssl-1_1-x64.dll" ] || [ ! -f "libcrypto-1_1-x64.dll" ]; then
+             echo "ERROR: OpenSSL DLLs failed to download or extract from your server."
+             echo "Please ensure http://hienob.bargmy.ir/openssl is a direct link to a ZIP file containing libssl-1_1-x64.dll and libcrypto-1_1-x64.dll"
+             exit 1
           fi
+          # --- FIX END ---
 
           # Copy MinGW runtimes
           cp "$MINGW_BIN/libgcc_s_seh-1.dll" . || true
@@ -146,13 +72,6 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ needs.prepare.outputs.new_version }}
-          name: "Windows Release ${{ needs.prepare.outputs.new_version }}"
           files: build/NoveoDesktop-${{ needs.prepare.outputs.new_version }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload Build Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: NoveoDesktop-Windows-${{ needs.prepare.outputs.new_version }}
-          path: build/NoveoDesktop-${{ needs.prepare.outputs.new_version }}.zip
