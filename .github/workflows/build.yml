@@ -93,7 +93,8 @@ jobs:
           target: 'desktop'
           arch: 'win64_mingw81'
           install-deps: 'true'
-          tools: 'tools_mingw,qt.tools.win64_mingw810'
+          # ADDED: qt.tools.openssl to download OpenSSL libraries
+          tools: 'tools_mingw,qt.tools.win64_mingw810,qt.tools.openssl'
 
       - name: Build and Package (MinGW)
         shell: bash
@@ -120,6 +121,21 @@ jobs:
           echo "Running windeployqt (will copy Qt DLLs & plugins)..."
           # Use full path to windeployqt.exe
           "$QT_ROOT/bin/windeployqt.exe" --release --no-translations --no-compiler-runtime --dir . ./NoveoDesktop.exe || true
+
+          # --- FIX START: Copy OpenSSL DLLs ---
+          echo "Copying OpenSSL DLLs..."
+          # Attempt to find and copy libssl and libcrypto (version 1.1 for Qt 5.15)
+          # We search specifically for the 64-bit variants usually provided by qt.tools.openssl
+          find "${IQTA_TOOLS}" -name "libssl-1_1-x64.dll" -exec cp {} . \;
+          find "${IQTA_TOOLS}" -name "libcrypto-1_1-x64.dll" -exec cp {} . \;
+
+          # Verification (and fallback search if names differ)
+          if [ ! -f "libssl-1_1-x64.dll" ]; then
+             echo "Standard x64 DLLs not found, attempting generic search..."
+             find "${IQTA_TOOLS}" -name "libssl-1_1.dll" -exec cp {} . \;
+             find "${IQTA_TOOLS}" -name "libcrypto-1_1.dll" -exec cp {} . \;
+          fi
+          # --- FIX END ---
 
           # Fallback: ensure core Qt DLLs are present (sometimes windeployqt misses due to env)
           for dll in Qt5Core.dll Qt5Gui.dll Qt5Network.dll Qt5WebSockets.dll Qt5Widgets.dll; do
