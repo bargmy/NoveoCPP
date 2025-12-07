@@ -17,39 +17,53 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    # --- SETUP QT (Explicit MinGW for Windows) ---
+    # 1. Install Qt
     - name: Install Qt
       uses: jurplel/install-qt-action@v3
       with:
         version: '5.15.2'
         host: ${{ matrix.os == 'windows-latest' && 'windows' || matrix.os == 'macos-latest' && 'mac' || 'linux' }}
         target: 'desktop'
-        # Crucial: Install MinGW toolchain for Windows
         arch: ${{ matrix.os == 'windows-latest' && 'win64_mingw81' || '' }}
         install-deps: 'true'
 
-    # --- LINUX DEPS ---
+    # 2. Linux Deps
     - name: Install Linux Deps
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
         sudo apt-get install -y libgl1-mesa-dev
 
-    # --- CONFIGURE (Force MinGW on Windows) ---
+    # 3. Create Build Dir
     - name: Create Build Directory
       run: mkdir build
 
+    # 4. Configure CMake (FIX: Force correct MinGW path)
     - name: Configure CMake
       working-directory: ./build
       run: |
         if [ "$RUNNER_OS" == "Windows" ]; then
-          cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc
+          # Force use of the MinGW 8.1.0 compiler bundled with Qt
+          # The install-qt-action usually sets IQTA_TOOLS variable, but we can also rely on PATH
+          # We explicitly point to the g++.exe inside the Qt Tools or the one added to path by the action
+          
+          # The action adds MinGW to path, but sometimes system MinGW overrides it.
+          # We force the path order or use explicit path if known.
+          # Usually it is installed at D:/a/NoveoCPP/Qt/Tools/mingw810_64/bin/g++.exe
+          
+          # Let's try relying on standard CMake but ensuring we pick the right generator
+          cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
         else
           cmake .. -DCMAKE_BUILD_TYPE=Release
         fi
       shell: bash
+      env:
+        # Crucial: This ensures the Qt-bundled MinGW is found BEFORE the system MinGW
+        # The 'install-qt-action' puts its tools in PATH, but we want to be sure.
+        CC: gcc
+        CXX: g++
 
-    # --- BUILD ---
+    # 5. Build
     - name: Build
       working-directory: ./build
       run: cmake --build . --config Release
@@ -62,6 +76,13 @@ jobs:
       working-directory: ./build
       run: |
         windeployqt --release --no-translations --no-compiler-runtime --no-angle --no-opengl-sw NoveoDesktop.exe
+        
+        # Copy MinGW DLLs manually because windeployqt might miss them
+        # We search for them in the PATH (which includes the Qt MinGW bin)
+        cp $(which libgcc_s_seh-1.dll) .
+        cp $(which libstdc++-6.dll) .
+        cp $(which libwinpthread-1.dll) .
+        
         7z a NoveoDesktop-Windows.zip * -xr!*.obj -xr!*.cpp -xr!*.h -xr!Makefile -xr!CMakeFiles
 
     # macOS Package
