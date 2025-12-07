@@ -62,22 +62,30 @@ jobs:
           target: 'desktop'
           arch: 'win64_mingw81'
           install-deps: 'true'
+          # We only install the compiler here. OpenSSL is handled manually below.
           tools: 'tools_mingw,qt.tools.win64_mingw810'
 
-      - name: Install OpenSSL 1.1.1 (Chocolatey)
+      - name: Download OpenSSL 1.1.1 (Qt Package)
+        shell: bash
         run: |
-          # Install specific version 1.1.1.2100 (OpenSSL 1.1.1u) to avoid OpenSSL 3.x
-          choco install openssl --version 1.1.1.2100 -y --no-progress
+          # Directly download the OpenSSL 1.1.1 binaries from Qt's official repo
+          # This bypasses 'aqt' metadata errors and 'choco' path issues.
+          echo "Downloading OpenSSL..."
+          curl -L -o openssl.7z https://download.qt.io/online/qtsdkrepository/windows_x86/desktop/tools_openssl/qt.tools.openssl.win_x64/1.1.1.k-2/qt.tools.openssl.win_x64.7z
+          
+          # Extract using 7zip (pre-installed on windows-latest)
+          7z x openssl.7z -oopenssl_libs
+          
+          echo "OpenSSL extracted to openssl_libs"
 
       - name: Build and Package
         shell: bash
         env:
           QT_ROOT: ${{ env.Qt5_Dir }}
-          # Path to the OpenSSL we just installed
-          OPENSSL_ROOT: "C:/Program Files/OpenSSL-Win64"
           MINGW_BIN: ${{ env.IQTA_TOOLS }}/mingw810_64/bin
         run: |
           set -e
+          export MINGW_BIN="${IQTA_TOOLS}/mingw810_64/bin"
           export PATH="$MINGW_BIN:$QT_ROOT/bin:$PATH"
           export QT_PLUGIN_PATH="${QT_ROOT}/plugins"
 
@@ -88,21 +96,39 @@ jobs:
           cmake --build . --config Release
 
           echo "Running windeployqt..."
-          "$QT_ROOT/bin/windeployqt.exe" --release --no-translations --no-compiler-runtime --dir . ./NoveoDesktop.exe || true
+          # The "Unable to find the platform plugin" error is common in CI. 
+          # We force the plugin path and ignore the exit code because we manually verify/copy plugins later.
+          "$QT_ROOT/bin/windeployqt.exe" --release --no-translations --no-compiler-runtime --plugindir "$QT_ROOT/plugins" --dir . ./NoveoDesktop.exe || true
 
-          # --- FIX: Copy OpenSSL DLLs from Chocolatey Install ---
-          echo "Copying OpenSSL DLLs from $OPENSSL_ROOT..."
+          # --- FIX: Copy OpenSSL DLLs from our manual download ---
+          echo "Copying OpenSSL DLLs..."
+          # The structure inside the 7z is usually Tools/OpenSSL/Win_x64/bin
+          OPENSSL_SRC="../openssl_libs/Tools/OpenSSL/Win_x64/bin"
           
-          # Try standard names (usually found in C:/Program Files/OpenSSL-Win64/bin)
-          # Note: The '|| true' prevents build failure if names differ, subsequent checks handle errors.
-          cp "$OPENSSL_ROOT/bin/libssl-1_1-x64.dll" . || cp "$OPENSSL_ROOT/bin/libssl-1_1.dll" . || true
-          cp "$OPENSSL_ROOT/bin/libcrypto-1_1-x64.dll" . || cp "$OPENSSL_ROOT/bin/libcrypto-1_1.dll" . || true
+          cp "$OPENSSL_SRC/libssl-1_1-x64.dll" .
+          cp "$OPENSSL_SRC/libcrypto-1_1-x64.dll" .
 
           # Verify they were copied
-          if [ ! -f "libssl-1_1-x64.dll" ] && [ ! -f "libssl-1_1.dll" ]; then
-             echo "ERROR: OpenSSL DLLs not found in $OPENSSL_ROOT/bin"
-             ls -R "$OPENSSL_ROOT"
-             exit 1
+          if [ ! -f "libssl-1_1-x64.dll" ]; then echo "ERROR: libssl-1_1-x64.dll missing"; exit 1; fi
+          # --- FIX END ---
+
+          # Fallback: ensure core Qt DLLs are present (sometimes windeployqt misses due to env)
+          for dll in Qt5Core.dll Qt5Gui.dll Qt5Network.dll Qt5WebSockets.dll Qt5Widgets.dll; do
+            if [ ! -f "$dll" ]; then
+              if [ -f "$QT_ROOT/bin/$dll" ]; then
+                echo "Copying $dll from Qt bin"
+                cp "$QT_ROOT/bin/$dll" .
+              fi
+            fi
+          done
+
+          # Ensure platform plugin is present
+          if [ ! -d "platforms" ] || [ ! -f "platforms/qwindows.dll" ]; then
+            echo "platforms/qwindows.dll missing -> attempting to copy"
+            mkdir -p platforms
+            if [ -f "$QT_ROOT/plugins/platforms/qwindows.dll" ]; then
+              cp "$QT_ROOT/plugins/platforms/qwindows.dll" platforms/
+            fi
           fi
 
           # Copy MinGW runtimes
@@ -113,6 +139,7 @@ jobs:
           # Create ZIP
           VERSION=${{ needs.prepare.outputs.new_version }}
           ZIP_NAME="NoveoDesktop-${VERSION}.zip"
+          echo "Zipping to $ZIP_NAME..."
           7z a "$ZIP_NAME" * -xr!*.obj -xr!*.cpp -xr!*.h -xr!Makefile -xr!CMakeFiles -xr!*_autogen
 
       - name: Upload Release Asset
@@ -123,3 +150,9 @@ jobs:
           files: build/NoveoDesktop-${{ needs.prepare.outputs.new_version }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NoveoDesktop-Windows-${{ needs.prepare.outputs.new_version }}
+          path: build/NoveoDesktop-${{ needs.prepare.outputs.new_version }}.zip
