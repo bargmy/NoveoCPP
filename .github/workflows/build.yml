@@ -17,6 +17,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    # 1. Install Qt
     - name: Install Qt
       uses: jurplel/install-qt-action@v3
       with:
@@ -25,46 +26,43 @@ jobs:
         target: 'desktop'
         arch: ${{ matrix.os == 'windows-latest' && 'win64_mingw81' || '' }}
         install-deps: 'true'
-        tools: 'tools_mingw,qt.tools.win64_mingw810' # Ensure tools are downloaded
+        tools: 'tools_mingw,qt.tools.win64_mingw810'
 
+    # 2. Linux Dependencies
     - name: Install Linux Deps
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
         sudo apt-get install -y libgl1-mesa-dev
 
+    # 3. Create Build Directory
     - name: Create Build Directory
       run: mkdir build
 
+    # 4. Configure CMake (Robust Windows Fix)
     - name: Configure CMake
       working-directory: ./build
       shell: bash
       run: |
         if [ "$RUNNER_OS" == "Windows" ]; then
-          # 1. FIND THE CORRECT COMPILER
-          # The action installs Qt in D:/a/NoveoCPP/Qt/
-          # We look for g++.exe inside that folder to avoid the system C:/mingw64
+          # Manually add the Qt-bundled MinGW to the front of the PATH
+          # IQTA_TOOLS is set by install-qt-action, usually D:\a\NoveoCPP\Qt\Tools
+          # The compiler is in mingw810_64\bin
           
-          # Find g++.exe inside D:/a/NoveoCPP/Qt/Tools
-          COMPILER_PATH=$(find ../ -type f -name "g++.exe" | grep "mingw810_64" | head -n 1)
+          MINGW_BIN="${IQTA_TOOLS}/mingw810_64/bin"
+          echo "Adding MinGW to PATH: $MINGW_BIN"
+          export PATH="$MINGW_BIN:$PATH"
           
-          if [ -z "$COMPILER_PATH" ]; then
-             echo "Could not find Qt MinGW! Falling back to PATH..."
-             COMPILER_PATH="g++"
-          else
-             echo "Found Qt MinGW: $COMPILER_PATH"
-          fi
-          
-          # 2. CONFIGURE with explicit compiler path
+          # Force CMake to use this gcc/g++
           cmake .. -G "MinGW Makefiles" \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_CXX_COMPILER="$COMPILER_PATH" \
-            -DCMAKE_C_COMPILER="${COMPILER_PATH/g++/gcc}"
-            
+            -DCMAKE_C_COMPILER="gcc.exe" \
+            -DCMAKE_CXX_COMPILER="g++.exe"
         else
           cmake .. -DCMAKE_BUILD_TYPE=Release
         fi
 
+    # 5. Build
     - name: Build
       working-directory: ./build
       run: cmake --build . --config Release
@@ -77,15 +75,15 @@ jobs:
       working-directory: ./build
       shell: bash
       run: |
+        # Add MinGW to PATH again for this step to find dlls
+        export PATH="${IQTA_TOOLS}/mingw810_64/bin:$PATH"
+        
         windeployqt --release --no-translations --no-compiler-runtime --no-angle --no-opengl-sw NoveoDesktop.exe
         
-        # Copy MinGW DLLs from the SAME compiler we used
-        COMPILER_PATH=$(find ../ -type f -name "g++.exe" | grep "mingw810_64" | head -n 1)
-        BIN_DIR=$(dirname "$COMPILER_PATH")
-        
-        cp "$BIN_DIR/libgcc_s_seh-1.dll" . || echo "libgcc skipped"
-        cp "$BIN_DIR/libstdc++-6.dll" . || echo "libstdc++ skipped"
-        cp "$BIN_DIR/libwinpthread-1.dll" . || echo "pthread skipped"
+        # Manually copy MinGW runtime DLLs
+        cp "${IQTA_TOOLS}/mingw810_64/bin/libgcc_s_seh-1.dll" . || echo "libgcc not found"
+        cp "${IQTA_TOOLS}/mingw810_64/bin/libstdc++-6.dll" . || echo "libstdc++ not found"
+        cp "${IQTA_TOOLS}/mingw810_64/bin/libwinpthread-1.dll" . || echo "pthread not found"
         
         7z a NoveoDesktop-Windows.zip * -xr!*.obj -xr!*.cpp -xr!*.h -xr!Makefile -xr!CMakeFiles -xr!*_autogen
 
@@ -97,17 +95,15 @@ jobs:
         macdeployqt NoveoDesktop.app -dmg
         mv NoveoDesktop.dmg NoveoDesktop-macOS.dmg
 
-    # Linux (Fixed: check file existence)
+    # Linux
     - name: Package Linux
       if: runner.os == 'Linux'
       working-directory: ./build
       run: |
-        # Ensure executable permission
         chmod +x NoveoDesktop
         zip NoveoDesktop-Linux.zip NoveoDesktop
 
     # --- UPLOAD ---
-    
     - name: Upload Assets
       uses: softprops/action-gh-release@v1
       if: startsWith(github.ref, 'refs/tags/')
