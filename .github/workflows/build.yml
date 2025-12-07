@@ -14,12 +14,12 @@ jobs:
     outputs:
       new_version: ${{ steps.setver.outputs.new_version }}
     steps:
-      - name: Checkout (full)
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Determine or bump tag and push (if dispatch)
+      - name: Determine version
         id: setver
         env:
           REPO: ${{ github.repository }}
@@ -27,44 +27,28 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
-          echo "event: $GITHUB_EVENT_NAME"
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            echo "Manual dispatch -> bumping patch version and creating tag."
             latest=$(git tag -l "v*" --sort=-v:refname | head -n 1)
-            if [ -z "$latest" ]; then
-              new="v1.0.0"
-            else
-              base=${latest#v}
-              major=${base%%.*}
-              rest=${base#*.}
-              minor=${rest%%.*}
-              patch=${rest##*.}
-              patch=$((patch + 1))
-              new="v$major.$minor.$patch"
+            if [ -z "$latest" ]; then new="v1.0.0"; else
+              base=${latest#v}; major=${base%%.*}; rest=${base#*.}; minor=${rest%%.*}; patch=${rest##*.}
+              patch=$((patch + 1)); new="v$major.$minor.$patch"
             fi
-            echo "New tag will be: $new"
-            if [ -n "$REPO_PAT" ]; then
-              AUTH_TOKEN="$REPO_PAT"
-            else
-              AUTH_TOKEN="$GITHUB_TOKEN"
-            fi
+            echo "new_version=$new" >> $GITHUB_OUTPUT
+            if [ -n "$REPO_PAT" ]; then AUTH="$REPO_PAT"; else AUTH="$GITHUB_TOKEN"; fi
             git config user.name "github-actions"
             git config user.email "github-actions@github.com"
-            git remote set-url origin https://${AUTH_TOKEN}@github.com/${REPO}.git
+            git remote set-url origin https://${AUTH}@github.com/${REPO}.git
             git tag "$new"
             git push origin "$new"
-            echo "new_version=$new" >> $GITHUB_OUTPUT
           else
-            refname=${GITHUB_REF##*/}
-            echo "Release event detected, using tag: $refname"
-            echo "new_version=$refname" >> $GITHUB_OUTPUT
+            echo "new_version=${GITHUB_REF##*/}" >> $GITHUB_OUTPUT
           fi
 
   build-windows:
     needs: prepare
     runs-on: windows-latest
     steps:
-      - name: Checkout the tag
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -78,91 +62,47 @@ jobs:
           target: 'desktop'
           arch: 'win64_mingw81'
           install-deps: 'true'
-          # ONLY install the compiler toolchain here. OpenSSL is separate.
           tools: 'tools_mingw,qt.tools.win64_mingw810'
 
-      - name: Install OpenSSL (Manual AQT)
-        shell: bash
+      - name: Install OpenSSL 1.1.1 (Chocolatey)
         run: |
-          # Manually install OpenSSL using aqt, which is already installed by the action above
-          # We use the python environment set up by the action
-          python -m aqt install-tool windows desktop tools_openssl qt.tools.openssl.win_x64 --outputdir "$Qt5_Dir/../../"
-        env:
-          # Use the same Qt directory structure
-          Qt5_Dir: ${{ env.Qt5_Dir }}
+          # Install specific version 1.1.1.2100 (OpenSSL 1.1.1u) to avoid OpenSSL 3.x
+          choco install openssl --version 1.1.1.2100 -y --no-progress
 
-      - name: Build and Package (MinGW)
+      - name: Build and Package
         shell: bash
         env:
           QT_ROOT: ${{ env.Qt5_Dir }}
+          # Path to the OpenSSL we just installed
+          OPENSSL_ROOT: "C:/Program Files/OpenSSL-Win64"
           MINGW_BIN: ${{ env.IQTA_TOOLS }}/mingw810_64/bin
         run: |
           set -e
-          echo "Qt5_Dir = ${Qt5_Dir}"
-          echo "IQTA_TOOLS = ${IQTA_TOOLS}"
-          
-          # We need to find where the manual step installed OpenSSL
-          # It usually goes to D:\a\NoveoCPP\Qt\Tools\OpenSSL\Win_x64
-          # We'll search for it dynamically to be safe.
-          OPENSSL_ROOT=$(find "${Qt5_Dir}/../../Tools" -type d -name "OpenSSL" | head -n 1)
-          echo "Found OpenSSL Root: $OPENSSL_ROOT"
-
-          export QT_ROOT="${Qt5_Dir}"
-          export MINGW_BIN="${IQTA_TOOLS}/mingw810_64/bin"
           export PATH="$MINGW_BIN:$QT_ROOT/bin:$PATH"
           export QT_PLUGIN_PATH="${QT_ROOT}/plugins"
 
-          mkdir -p build
-          cd build
+          mkdir -p build && cd build
 
           echo "Configuring project..."
           cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
-          echo "Building..."
           cmake --build . --config Release
 
           echo "Running windeployqt..."
           "$QT_ROOT/bin/windeployqt.exe" --release --no-translations --no-compiler-runtime --dir . ./NoveoDesktop.exe || true
 
-          # --- FIX START: Copy OpenSSL DLLs ---
-          echo "Copying OpenSSL DLLs..."
+          # --- FIX: Copy OpenSSL DLLs from Chocolatey Install ---
+          echo "Copying OpenSSL DLLs from $OPENSSL_ROOT..."
           
-          # Search in the OpenSSL tool directory we just installed
-          if [ -d "$OPENSSL_ROOT" ]; then
-             find "$OPENSSL_ROOT" -name "libssl-1_1-x64.dll" -exec cp {} . \;
-             find "$OPENSSL_ROOT" -name "libcrypto-1_1-x64.dll" -exec cp {} . \;
-             
-             # Also try standard names if x64 variants aren't found
-             if [ ! -f "libssl-1_1-x64.dll" ]; then
-                find "$OPENSSL_ROOT" -name "libssl-1_1.dll" -exec cp {} . \;
-                find "$OPENSSL_ROOT" -name "libcrypto-1_1.dll" -exec cp {} . \;
-             fi
-          else
-             echo "ERROR: OpenSSL directory not found!"
-             exit 1
-          fi
+          # Try standard names (usually found in C:/Program Files/OpenSSL-Win64/bin)
+          # Note: The '|| true' prevents build failure if names differ, subsequent checks handle errors.
+          cp "$OPENSSL_ROOT/bin/libssl-1_1-x64.dll" . || cp "$OPENSSL_ROOT/bin/libssl-1_1.dll" . || true
+          cp "$OPENSSL_ROOT/bin/libcrypto-1_1-x64.dll" . || cp "$OPENSSL_ROOT/bin/libcrypto-1_1.dll" . || true
 
+          # Verify they were copied
           if [ ! -f "libssl-1_1-x64.dll" ] && [ ! -f "libssl-1_1.dll" ]; then
-              echo "ERROR: Could not find OpenSSL DLLs to copy."
-              exit 1
-          fi
-          # --- FIX END ---
-
-          # Fallback: ensure core Qt DLLs are present
-          for dll in Qt5Core.dll Qt5Gui.dll Qt5Network.dll Qt5WebSockets.dll Qt5Widgets.dll; do
-            if [ ! -f "$dll" ]; then
-              if [ -f "$QT_ROOT/bin/$dll" ]; then
-                echo "Copying $dll from Qt bin"
-                cp "$QT_ROOT/bin/$dll" .
-              fi
-            fi
-          done
-
-          # Ensure platform plugin
-          if [ ! -d "platforms" ] || [ ! -f "platforms/qwindows.dll" ]; then
-            mkdir -p platforms
-            if [ -f "$QT_ROOT/plugins/platforms/qwindows.dll" ]; then
-              cp "$QT_ROOT/plugins/platforms/qwindows.dll" platforms/
-            fi
+             echo "ERROR: OpenSSL DLLs not found in $OPENSSL_ROOT/bin"
+             ls -R "$OPENSSL_ROOT"
+             exit 1
           fi
 
           # Copy MinGW runtimes
@@ -170,23 +110,16 @@ jobs:
           cp "$MINGW_BIN/libstdc++-6.dll" . || true
           cp "$MINGW_BIN/libwinpthread-1.dll" . || true
 
+          # Create ZIP
           VERSION=${{ needs.prepare.outputs.new_version }}
           ZIP_NAME="NoveoDesktop-${VERSION}.zip"
-
-          echo "Creating ZIP: $ZIP_NAME"
           7z a "$ZIP_NAME" * -xr!*.obj -xr!*.cpp -xr!*.h -xr!Makefile -xr!CMakeFiles -xr!*_autogen
 
-      - name: Upload ZIP to Release
+      - name: Upload Release Asset
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ needs.prepare.outputs.new_version }}
-          name: "NoveoDesktop Windows Release - ${{ needs.prepare.outputs.new_version }}"
+          name: "Windows Release ${{ needs.prepare.outputs.new_version }}"
           files: build/NoveoDesktop-${{ needs.prepare.outputs.new_version }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload Build Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: NoveoDesktop-Windows-${{ needs.prepare.outputs.new_version }}
-          path: build/NoveoDesktop-${{ needs.prepare.outputs.new_version }}.zip
