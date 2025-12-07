@@ -1,0 +1,89 @@
+name: Build NoveoDesktop
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    # --- SETUP QT ---
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v3
+      with:
+        version: '5.15.2'
+        host: ${{ matrix.os }}
+        target: 'desktop'
+        arch: ${{ matrix.os == 'windows-latest' && 'win64_mingw81' || '' }}
+        install-deps: 'true'
+
+    # --- LINUX DEPENDENCIES ---
+    - name: Install Linux Deps
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgl1-mesa-dev
+
+    # --- BUILD ---
+    - name: Create Build Directory
+      run: mkdir build
+
+    - name: Configure CMake
+      working-directory: ./build
+      run: cmake .. -DCMAKE_BUILD_TYPE=Release
+
+    - name: Build
+      working-directory: ./build
+      run: cmake --build . --config Release
+
+    # --- DEPLOYMENT (OS SPECIFIC) ---
+    
+    # 1. WINDOWS DEPLOY
+    - name: Deploy Windows
+      if: runner.os == 'Windows'
+      working-directory: ./build
+      run: |
+        # Updated executable name
+        windeployqt --release --no-translations --no-compiler-runtime NoveoDesktop.exe
+
+    # 2. MAC DEPLOY (MacDeployQt)
+    - name: Deploy macOS
+      if: runner.os == 'macOS'
+      working-directory: ./build
+      run: |
+        # Updated bundle name
+        macdeployqt NoveoDesktop.app -dmg
+
+    # --- UPLOAD ARTIFACTS ---
+    - name: Upload Windows Artifact
+      if: runner.os == 'Windows'
+      uses: actions/upload-artifact@v4
+      with:
+        name: NoveoDesktop-Windows
+        path: build/
+        
+    - name: Upload Linux Artifact
+      if: runner.os == 'Linux'
+      uses: actions/upload-artifact@v4
+      with:
+        name: NoveoDesktop-Linux
+        path: build/NoveoDesktop
+
+    - name: Upload macOS Artifact
+      if: runner.os == 'macOS'
+      uses: actions/upload-artifact@v4
+      with:
+        name: NoveoDesktop-macOS
+        path: build/NoveoDesktop.dmg
