@@ -3,6 +3,7 @@ name: Build and Release
 on:
   release:
     types: [published]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -16,11 +17,13 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    # Fix: Map runner OS names to valid Qt host names
     - name: Install Qt
       uses: jurplel/install-qt-action@v3
       with:
         version: '5.15.2'
-        host: ${{ matrix.os }}
+        # The 'host' parameter must be 'windows', 'linux', or 'mac'
+        host: ${{ matrix.os == 'windows-latest' && 'windows' || matrix.os == 'macos-latest' && 'mac' || 'linux' }}
         target: 'desktop'
         arch: ${{ matrix.os == 'windows-latest' && 'win64_mingw81' || '' }}
         install-deps: 'true'
