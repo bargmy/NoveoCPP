@@ -1,7 +1,4 @@
 #include "MainWindow.h"
-// MessageBubble.h is no longer needed for rendering.
-// We now use a Delegate for chat messages.
-
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -21,6 +18,7 @@
 #include <QAbstractTextDocumentLayout>
 #include <QDateTime>
 #include <QScrollBar> 
+#include <QSet>
 
 // ==========================================
 // 1. CONTACT LIST DELEGATE (Sidebar)
@@ -48,7 +46,6 @@ public:
             icon.paint(painter, rect.left() + padding, iconY, iconSize, iconSize);
         }
 
-        // Regex for Nametag
         static QRegularExpression regex("^(.*)\\s\\[#([a-fA-F0-9]{6}),\\s*\"(.*)\"\\]$");
         QRegularExpressionMatch match = regex.match(fullText);
 
@@ -64,7 +61,6 @@ public:
             hasTag = true;
         }
 
-        // Draw Name
         QColor textColor = (opt.state & QStyle::State_Selected) ? Qt::white : opt.palette.text().color();
         painter->setPen(textColor);
         QFont nameFont = opt.font;
@@ -75,11 +71,9 @@ public:
         QFontMetrics fm(nameFont);
         int nameWidth = fm.horizontalAdvance(name);
         
-        // Vertically center text
         int textY = rect.top() + (rect.height() - fm.height()) / 2 + fm.ascent();
         painter->drawText(textX, textY, name);
 
-        // Draw Tag
         if (hasTag) {
             int tagX = textX + nameWidth + 8;
             int tagH = 18;
@@ -121,18 +115,16 @@ public:
         m_isDarkMode = isDarkMode;
     }
 
-    // Helper to calculate bubble geometry
     void getBubbleLayout(const QString &text, const QString &sender, bool isMe, int viewWidth,
                          QRect &bubbleRect, QRect &textRect, QRect &nameRect, QRect &avatarRect, int &neededHeight) const {
         int maxBubbleWidth = viewWidth * 0.75; 
         int nameHeight = isMe ? 0 : 18; 
         int timeHeight = 12;
         int bubblePadding = 16; 
-        int avatarSize = 38; // Size of the PFP
+        int avatarSize = 38; 
         int avatarGap = 10;
         int sideMargin = 10;
 
-        // 1. Calculate Name Width (Fix for Nametag sticking out)
         static QRegularExpression regex("^(.*)\\s\\[#([a-fA-F0-9]{6}),\\s*\"(.*)\"\\]$");
         QRegularExpressionMatch match = regex.match(sender);
         QString displayName = sender;
@@ -145,26 +137,22 @@ public:
         }
 
         int totalNameWidth = 0;
-        // Only calculate name width contribution if it's NOT me (since I don't see my own name)
         if (!isMe) {
-            // Measure Name
             QFont nameFont("Segoe UI", 11);
             nameFont.setBold(true);
             QFontMetrics fm(nameFont);
             int nameTextW = fm.horizontalAdvance(displayName);
             
-            // Measure Tag
             int tagW = 0;
             if (hasTag) {
                 QFont tagFont("Segoe UI", 9);
                 tagFont.setBold(true);
                 QFontMetrics tagFm(tagFont);
-                tagW = tagFm.horizontalAdvance(tagText) + 12; // +padding inside tag
+                tagW = tagFm.horizontalAdvance(tagText) + 12; 
             }
             totalNameWidth = nameTextW + (hasTag ? (tagW + 8) : 0);
         }
 
-        // 2. Calculate Text Height
         QTextDocument doc;
         doc.setDefaultFont(QFont("Segoe UI", 10));
         doc.setPlainText(text);
@@ -172,23 +160,18 @@ public:
         int textWidth = doc.idealWidth();
         int textHeight = doc.size().height();
 
-        // 3. Determine Bubble Dimensions
-        // If isMe, don't let a long username force the bubble to be wide.
         int contentWidth = isMe ? (textWidth + 20) : qMax(textWidth + 20, totalNameWidth + 30);
         int bubbleW = qMax(contentWidth, 60); 
 
         int bubbleH = textHeight + nameHeight + timeHeight + bubblePadding;
-        neededHeight = bubbleH + 10; // +10 for external margin
+        neededHeight = bubbleH + 10; 
 
-        // 4. Position
         int x;
         if (isMe) {
             x = viewWidth - bubbleW - sideMargin;
-            avatarRect = QRect(); // No avatar for self
+            avatarRect = QRect(); 
         } else {
-            // Shift bubble right to make room for avatar
             x = sideMargin + avatarSize + avatarGap;
-            // Avatar aligned to the bottom of the message
             avatarRect = QRect(sideMargin, 5 + bubbleH - avatarSize, avatarSize, avatarSize);
         }
 
@@ -206,7 +189,6 @@ public:
         painter->save();
         painter->setRenderHint(QPainter::Antialiasing);
 
-        // Retrieve data
         QString text = index.data(Qt::UserRole + 1).toString();
         QString sender = index.data(Qt::UserRole + 2).toString();
         qint64 timestamp = index.data(Qt::UserRole + 3).toLongLong();
@@ -217,31 +199,26 @@ public:
         int neededHeight;
         getBubbleLayout(text, sender, isMe, option.rect.width(), bubbleRect, textRect, nameRect, avatarRect, neededHeight);
 
-        // Adjust rects to current item position
         bubbleRect.translate(0, option.rect.top());
         textRect.translate(0, option.rect.top());
         nameRect.translate(0, option.rect.top());
         avatarRect.translate(0, option.rect.top());
 
-        // Draw Avatar (if not me)
         if (!isMe && !avatar.isNull()) {
             avatar.paint(painter, avatarRect);
         }
 
-        // Draw Bubble Background
         QColor bubbleColor;
         QColor borderColor;
         QColor textColor;
         QColor timeColor;
 
         if (m_isDarkMode) {
-            // Dark Mode Colors
             bubbleColor = isMe ? QColor("#2b5278") : QColor("#2d2d2d"); 
             borderColor = Qt::transparent; 
             textColor = Qt::white;
             timeColor = QColor("#a0a0a0");
         } else {
-            // Light Mode Colors
             bubbleColor = isMe ? QColor("#EEFFDE") : Qt::white;
             borderColor = QColor("#d0d0d0");
             textColor = Qt::black;
@@ -252,7 +229,6 @@ public:
         painter->setPen(borderColor == Qt::transparent ? Qt::NoPen : QPen(borderColor, 1));
         painter->drawRoundedRect(bubbleRect, 12, 12);
 
-        // Draw Name (if not me)
         if (!isMe) {
             static QRegularExpression regex("^(.*)\\s\\[#([a-fA-F0-9]{6}),\\s*\"(.*)\"\\]$");
             QRegularExpressionMatch match = regex.match(sender);
@@ -268,7 +244,6 @@ public:
                 hasTag = true;
             }
 
-            // Draw Display Name
             painter->setPen(QColor("#E35967")); 
             QFont nameFont = option.font;
             nameFont.setPixelSize(11);
@@ -278,7 +253,6 @@ public:
             int nameW = fm.horizontalAdvance(displayName);
             painter->drawText(nameRect.left(), nameRect.top() + fm.ascent(), displayName);
 
-            // Draw Tag
             if (hasTag) {
                 int tagX = nameRect.left() + nameW + 6;
                 int tagY = nameRect.top(); 
@@ -297,13 +271,11 @@ public:
             }
         }
 
-        // Draw Message Text
         painter->setPen(textColor);
         QTextDocument doc;
         QFont textFont("Segoe UI", 10);
         doc.setDefaultFont(textFont);
         
-        // Ensure text color is applied
         QString html = QString("<span style='color:%1;'>%2</span>")
                        .arg(textColor.name())
                        .arg(text.toHtmlEscaped().replace("\n", "<br>"));
@@ -314,7 +286,6 @@ public:
         doc.drawContents(painter);
         painter->translate(-textRect.topLeft());
 
-        // Draw Timestamp
         QDateTime dt;
         dt.setSecsSinceEpoch(timestamp);
         QString timeStr = dt.toString("hh:mm AP");
@@ -465,7 +436,7 @@ void MainWindow::setupUi() {
     m_chatTitle->setStyleSheet("font-size: 16px; font-weight: bold; margin-left: 10px;");
     headerLayout->addWidget(m_chatTitle);
 
-    // --- REPLACED SCROLL AREA WITH QLISTWIDGET (For Virtualization) ---
+    // --- Chat List Widget (Replaced Scroll Area) ---
     m_chatList = new QListWidget();
     m_chatList->setObjectName("chatList");
     m_chatList->setFrameShape(QFrame::NoFrame);
@@ -475,6 +446,9 @@ void MainWindow::setupUi() {
     m_chatList->setSelectionMode(QAbstractItemView::NoSelection); // No highlight on click
     m_chatList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff); // Requested feature
     m_chatList->setItemDelegate(new MessageDelegate(this));
+    
+    // NEW: Connect scroll bar to handle history loading
+    connect(m_chatList->verticalScrollBar(), &QScrollBar::valueChanged, this, &MainWindow::onScrollValueChanged);
 
     // Input Area
     QWidget *inputArea = new QWidget();
@@ -530,14 +504,12 @@ void MainWindow::applyTheme() {
         "#inputArea { background-color: %2; border-top: 1px solid %4; }"
         "#chatList { background-color: %1; border: none; }"
         
-        /* ScrollBar Styling */
         "QScrollBar:vertical { border: none; background: %2; width: 10px; margin: 0px; }"
         "QScrollBar::handle:vertical { background: %7; min-height: 20px; border-radius: 5px; }"
         "QScrollBar::handle:vertical:hover { background: %8; }"
         "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }"
         "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }"
         
-        /* CheckBox Styling */
         "QCheckBox { color: %3; spacing: 5px; }"
         "QCheckBox::indicator { width: 18px; height: 18px; border: 1px solid %4; border-radius: 4px; background: %5; }"
         "QCheckBox::indicator:checked { background-color: #0088cc; border: 1px solid #0088cc; }"
@@ -545,14 +517,27 @@ void MainWindow::applyTheme() {
 
     setStyleSheet(style);
 
-    // Update Delegate Theme
     if (m_chatList->itemDelegate()) {
-        // Use dynamic_cast instead of qobject_cast because MessageDelegate 
-        // does not have Q_OBJECT macro (defined in .cpp file)
         MessageDelegate *delegate = dynamic_cast<MessageDelegate*>(m_chatList->itemDelegate());
         if (delegate) {
             delegate->setTheme(m_isDarkMode);
-            m_chatList->viewport()->update(); // Force repaint
+            m_chatList->viewport()->update(); 
+        }
+    }
+}
+
+// NEW: Slot to handle scroll up for history
+void MainWindow::onScrollValueChanged(int value) {
+    // If scrolled to top (0), not already loading, and we have an active chat
+    if (value == 0 && !m_isLoadingHistory && !m_currentChatId.isEmpty()) {
+        if (m_chats.contains(m_currentChatId)) {
+            const auto &msgs = m_chats[m_currentChatId].messages;
+            if (!msgs.empty()) {
+                qint64 oldestTime = msgs.front().timestamp;
+                m_isLoadingHistory = true;
+                // Request older messages from server
+                m_client->fetchHistory(m_currentChatId, oldestTime);
+            }
         }
     }
 }
@@ -616,7 +601,6 @@ void MainWindow::onUserListUpdated(const std::vector<User> &users) {
         item->setData(Qt::UserRole, u.userId);
         item->setIcon(getAvatar(u.username, u.avatarUrl));
     }
-    // Refresh chat names
     for(int i=0; i<m_chatListWidget->count(); i++) {
         QListWidgetItem *item = m_chatListWidget->item(i);
         QString chatId = item->data(Qt::UserRole).toString();
@@ -628,23 +612,106 @@ void MainWindow::onUserListUpdated(const std::vector<User> &users) {
     }
 }
 
-void MainWindow::onChatHistoryReceived(const std::vector<Chat> &chats) {
-    m_chats.clear();
-    m_chatListWidget->clear();
-    std::vector<Chat> sortedChats = chats;
-    std::sort(sortedChats.begin(), sortedChats.end(), [](const Chat &a, const Chat &b) {
-        qint64 timeA = a.messages.empty() ? 0 : a.messages.back().timestamp;
-        qint64 timeB = b.messages.empty() ? 0 : b.messages.back().timestamp;
-        return timeA > timeB;
-    });
-    for (const auto &chat : sortedChats) {
-        m_chats.insert(chat.chatId, chat);
-        QListWidgetItem *item = new QListWidgetItem(m_chatListWidget);
-        QString name = resolveChatName(chat);
-        item->setText(name);
-        item->setData(Qt::UserRole, chat.chatId);
-        item->setIcon(getAvatar(name, chat.avatarUrl));
-        m_chatListWidget->addItem(item);
+void MainWindow::onChatHistoryReceived(const std::vector<Chat> &incomingChats) {
+    bool initialLoad = m_chats.isEmpty();
+    
+    // Merge new chats/messages into existing data
+    for (const auto &inChat : incomingChats) {
+        if (m_chats.contains(inChat.chatId)) {
+            // Existing chat: Merge messages
+            Chat &existingChat = m_chats[inChat.chatId];
+            
+            // Create a set of existing IDs for fast lookup
+            QSet<QString> existingIds;
+            for(const auto &m : existingChat.messages) existingIds.insert(m.messageId);
+
+            // Add ONLY new messages (which are likely older ones from history fetch)
+            std::vector<Message> newMessages;
+            for(const auto &m : inChat.messages) {
+                if (!existingIds.contains(m.messageId)) {
+                    newMessages.push_back(m);
+                }
+            }
+            
+            if (!newMessages.empty()) {
+                // Append new ones
+                existingChat.messages.insert(existingChat.messages.end(), newMessages.begin(), newMessages.end());
+                // Re-sort all by timestamp
+                std::sort(existingChat.messages.begin(), existingChat.messages.end(), [](const Message &a, const Message &b){
+                    return a.timestamp < b.timestamp;
+                });
+                
+                // If this is the active chat and we were loading history, update UI
+                if (m_currentChatId == inChat.chatId && m_isLoadingHistory) {
+                    // Turn off flag
+                    m_isLoadingHistory = false;
+                    
+                    // We need to prepend these new (older) messages to the UI
+                    // Sort the NEW messages only to insert them in order
+                    std::sort(newMessages.begin(), newMessages.end(), [](const Message &a, const Message &b){
+                        return a.timestamp > b.timestamp; // Reverse for insertion at top (newest of the old at index 0? No.)
+                    });
+                    // Actually, we want them at the TOP. 
+                    // Example:
+                    // UI: [Msg 10] [Msg 11]
+                    // History: [Msg 8] [Msg 9]
+                    // We want: [Msg 8] [Msg 9] [Msg 10] [Msg 11]
+                    // So we iterate backwards (Msg 9 then Msg 8) and insert at 0?
+                    // No, insert [Msg 9] at 0 -> [Msg 9] [Msg 10]
+                    // Then insert [Msg 8] at 0 -> [Msg 8] [Msg 9] [Msg 10]
+                    // So we need to sort newMessages by timestamp DESCENDING and insert at 0.
+                    
+                    std::sort(newMessages.begin(), newMessages.end(), [](const Message &a, const Message &b){
+                        return a.timestamp < b.timestamp; // Ascending: 8, 9
+                    });
+                    
+                    // Save scroll height before insertion
+                    int oldMax = m_chatList->verticalScrollBar()->maximum();
+                    
+                    // Insert from newest-old to oldest-old?
+                    // 8, 9. 
+                    // Insert 9 at 0. List: 9, 10, 11
+                    // Insert 8 at 0. List: 8, 9, 10, 11. Correct.
+                    // So reverse iterate the ascending list
+                    for (auto it = newMessages.rbegin(); it != newMessages.rend(); ++it) {
+                        prependMessageBubble(*it);
+                    }
+                    
+                    // Restore scroll position
+                    // The content grew by (newMax - oldMax).
+                    // We were at 0. We should be at (newMax - oldMax).
+                    // This keeps the view on the "Msg 10" which was at top.
+                    int newMax = m_chatList->verticalScrollBar()->maximum();
+                    m_chatList->verticalScrollBar()->setValue(newMax - oldMax);
+                }
+            }
+            
+        } else {
+            // New chat entirely
+            m_chats.insert(inChat.chatId, inChat);
+        }
+    }
+
+    // Refresh Sidebar List (Only if initial or new chat added)
+    if (initialLoad) {
+        m_chatListWidget->clear();
+        std::vector<Chat> sortedChats;
+        for(auto k : m_chats.keys()) sortedChats.push_back(m_chats[k]);
+        
+        std::sort(sortedChats.begin(), sortedChats.end(), [](const Chat &a, const Chat &b) {
+            qint64 timeA = a.messages.empty() ? 0 : a.messages.back().timestamp;
+            qint64 timeB = b.messages.empty() ? 0 : b.messages.back().timestamp;
+            return timeA > timeB;
+        });
+
+        for (const auto &chat : sortedChats) {
+            QListWidgetItem *item = new QListWidgetItem(m_chatListWidget);
+            QString name = resolveChatName(chat);
+            item->setText(name);
+            item->setData(Qt::UserRole, chat.chatId);
+            item->setIcon(getAvatar(name, chat.avatarUrl));
+            m_chatListWidget->addItem(item);
+        }
     }
 }
 
@@ -760,13 +827,37 @@ void MainWindow::renderMessages(const QString &chatId) {
     scrollToBottom();
 }
 
+// NEW: Helper to add bubble at the top (for history)
+void MainWindow::prependMessageBubble(const Message &msg) {
+    bool isMe = (msg.senderId == m_client->currentUserId());
+    
+    QString senderName = "Unknown";
+    QString avatarUrl = "";
+    if (m_users.contains(msg.senderId)) {
+        senderName = m_users[msg.senderId].username;
+        avatarUrl = m_users[msg.senderId].avatarUrl;
+    }
+
+    QListWidgetItem *item = new QListWidgetItem(); // No parent initially
+    item->setData(Qt::UserRole + 1, msg.text);
+    item->setData(Qt::UserRole + 2, senderName);
+    item->setData(Qt::UserRole + 3, msg.timestamp);
+    item->setData(Qt::UserRole + 4, isMe);
+    
+    if (!isMe) {
+        item->setIcon(getAvatar(senderName, avatarUrl));
+    }
+    
+    // Insert at index 0
+    m_chatList->insertItem(0, item);
+}
+
 void MainWindow::addMessageBubble(const Message &msg, bool appendStretch, bool animate) {
     Q_UNUSED(appendStretch);
     Q_UNUSED(animate);
 
     bool isMe = (msg.senderId == m_client->currentUserId());
     
-    // Retrieve Sender Name and Avatar URL
     QString senderName = "Unknown";
     QString avatarUrl = "";
     if (m_users.contains(msg.senderId)) {
@@ -780,7 +871,6 @@ void MainWindow::addMessageBubble(const Message &msg, bool appendStretch, bool a
     item->setData(Qt::UserRole + 3, msg.timestamp);
     item->setData(Qt::UserRole + 4, isMe);
     
-    // Set Avatar Icon (Qt::DecorationRole) - PFP Feature
     if (!isMe) {
         item->setIcon(getAvatar(senderName, avatarUrl));
     }
