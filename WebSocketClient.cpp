@@ -12,12 +12,15 @@ WebSocketClient::WebSocketClient(QObject *parent) : QObject(parent)
 
 void WebSocketClient::connectToServer()
 {
+    // Update URL if your server address changes
     m_webSocket.open(QUrl(QStringLiteral("wss://api.pcpapc172.ir:8443/ws")));
 }
 
 void WebSocketClient::onSslErrors(const QList<QSslError> &errors)
 {
     Q_UNUSED(errors);
+    // WARNING: Ignoring SSL errors is dangerous for production.
+    // For development with self-signed certs, this is acceptable.
     m_webSocket.ignoreSslErrors();
 }
 
@@ -35,10 +38,12 @@ bool WebSocketClient::isConnected() const
 void WebSocketClient::login(const QString &username, const QString &password)
 {
     if (!isConnected()) return;
+
     QJsonObject payload;
     payload["type"] = "login_with_password";
     payload["username"] = username;
     payload["password"] = password;
+
     QJsonDocument doc(payload);
     m_webSocket.sendTextMessage(QString::fromUtf8(doc.toJson(QJsonDocument::Compact)));
 }
@@ -57,8 +62,12 @@ void WebSocketClient::sendMessage(const QString &chatId, const QString &text, co
     payload["chatId"] = chatId;
     payload["content"] = content;
 
-    if (!replyToId.isEmpty()) payload["replyToId"] = replyToId;
-    else payload["replyToId"] = QJsonValue::Null;
+    // Handle Reply Logic
+    if (!replyToId.isEmpty()) {
+        payload["replyToId"] = replyToId;
+    } else {
+        payload["replyToId"] = QJsonValue::Null;
+    }
 
     QJsonDocument doc(payload);
     m_webSocket.sendTextMessage(QString::fromUtf8(doc.toJson(QJsonDocument::Compact)));
@@ -67,19 +76,23 @@ void WebSocketClient::sendMessage(const QString &chatId, const QString &text, co
 void WebSocketClient::sendTyping(const QString &chatId)
 {
     if (!isConnected()) return;
+
     QJsonObject payload;
     payload["type"] = "typing";
     payload["chatId"] = chatId;
+    
     m_webSocket.sendTextMessage(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)));
 }
 
 void WebSocketClient::deleteMessage(const QString &chatId, const QString &messageId)
 {
     if (!isConnected()) return;
+
     QJsonObject payload;
     payload["type"] = "delete_message";
     payload["chatId"] = chatId;
     payload["messageId"] = messageId;
+    
     m_webSocket.sendTextMessage(QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)));
 }
 
@@ -121,6 +134,7 @@ void WebSocketClient::handleLoginSuccess(const QJsonObject &data)
     m_currentUser.username = userObj["username"].toString();
     m_currentUser.avatarUrl = userObj["avatarUrl"].toString();
     m_token = data["token"].toString();
+    
     emit loginSuccess(m_currentUser, m_token);
 }
 
@@ -183,6 +197,7 @@ void WebSocketClient::handleMessage(const QJsonObject &mObj)
          contentObj = mObj["content"].toObject();
     }
     msg.text = contentObj["text"].toString();
+    
     emit messageReceived(msg);
 }
 
@@ -210,7 +225,9 @@ void WebSocketClient::handleNewChat(const QJsonObject &data)
     chat.chatName = cObj["chatName"].toString();
     chat.chatType = cObj["chatType"].toString();
     chat.avatarUrl = cObj["avatarUrl"].toString();
+    
     QJsonArray membersArr = cObj["members"].toArray();
     for(const auto &m : membersArr) chat.members.append(m.toString());
+    
     emit newChatCreated(chat);
 }
