@@ -17,6 +17,7 @@ jobs:
     outputs:
       new_version: ${{ steps.setver.outputs.new_version }}
       build_date: ${{ steps.date.outputs.date }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,51 +36,88 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
+
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            # Find latest v*-style tag (vMAJOR.MINOR.PATCH.BUILD)
             latest=$(git tag -l "v*" --sort=-v:refname | head -n 1)
+
             if [ -z "$latest" ]; then
-              new="v1.0.0"
+              # First tag ever
+              new="v1.0.0.0"
             else
               base=${latest#v}
-              major=${base%%.*}
-              rest=${base#*.}
-              minor=${rest%%.*}
-              patch=${rest##*.}
-              patch=$((patch + 1))
-              if [ "$patch" -gt 15 ]; then
-                patch=0
-                minor=$((minor + 1))
+
+              # Parse up to 4 numeric components; default BUILD to 0 if missing
+              IFS='.' read -r MAJOR MINOR PATCH BUILD <<< "$base"
+              : "${BUILD:=0}"
+
+              echo "Latest tag: $latest -> ${MAJOR}.${MINOR}.${PATCH}.${BUILD}"
+
+              # Detect code changes since last tag, ignoring non-code files
+              # (CMakeLists.txt, version.rc, README.md, icon.png, icon.ico)
+              changed_files=$(git diff --name-only "$latest"..HEAD | grep -vE '^(CMakeLists\.txt|version\.rc|README\.md|icon\.png|icon\.ico)$' || true)
+
+              if [ -n "$changed_files" ]; then
+                echo "Code changes detected (excluding ignored files):"
+                echo "$changed_files"
+                CODE_CHANGED=1
+              else
+                echo "No code changes detected (only ignored files changed or no changes)."
+                CODE_CHANGED=0
               fi
-              if [ "$minor" -gt 99 ]; then
-                minor=0
-                major=$((major + 1))
+
+              if [ "$CODE_CHANGED" -eq 1 ]; then
+                # Bump PATCH, reset BUILD to 0 (e.g. 1.2.0.3 -> 1.2.1.0)
+                PATCH=$((PATCH + 1))
+                BUILD=0
+
+                # Same rollover rules as before: PATCH>15 → MINOR+1, PATCH=0; MINOR>99 → MAJOR+1, MINOR=0
+                if [ "$PATCH" -gt 15 ]; then
+                  PATCH=0
+                  MINOR=$((MINOR + 1))
+                fi
+
+                if [ "$MINOR" -gt 99 ]; then
+                  MINOR=0
+                  MAJOR=$((MAJOR + 1))
+                fi
+              else
+                # No code changes: keep PATCH, bump BUILD (e.g. 1.2.0.3 -> 1.2.0.4)
+                BUILD=$((BUILD + 1))
               fi
-              new="v$major.$minor.$patch"
+
+              new="v${MAJOR}.${MINOR}.${PATCH}.${BUILD}"
             fi
+
             echo "Manual dispatch -> new tag: $new"
+
             if [ -n "$REPO_PAT" ]; then
               AUTH_TOKEN="$REPO_PAT"
             else
               AUTH_TOKEN="$GITHUB_TOKEN"
             fi
+
             git config user.name "github-actions"
             git config user.email "github-actions@github.com"
             git remote set-url origin https://${AUTH_TOKEN}@github.com/${REPO}.git
             git tag "$new"
             git push origin "$new"
+
             echo "new_version=$new" >> $GITHUB_OUTPUT
           else
+            # Release event: just use the tag that triggered the workflow
             refname=${GITHUB_REF##*/}
             echo "Release event -> using tag: $refname"
             echo "new_version=$refname" >> $GITHUB_OUTPUT
           fi
 
   # =========================================================
-  # WINDOWS BUILD (Working: Manual Copy)
+  # WINDOWS BUILD (Manual Copy, uses 4-part version)
   # =========================================================
   build-windows:
     needs: prepare
     runs-on: windows-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -106,17 +144,18 @@ jobs:
           DATE: ${{ needs.prepare.outputs.build_date }}
         run: |
           set -e
-          
-          # 1. Update version.rc
+
+          # 1. Update version.rc from tag (vMAJOR.MINOR.PATCH.BUILD)
           VER_NO_V=${VERSION#v}
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$VER_NO_V"
-          RC_NUM="${MAJOR},${MINOR},${PATCH},0"
-          RC_STR="${MAJOR}.${MINOR}.${PATCH}.0"
+          IFS='.' read -r MAJOR MINOR PATCH BUILD <<< "$VER_NO_V"
+          RC_NUM="${MAJOR},${MINOR},${PATCH},${BUILD}"
+          RC_STR="${MAJOR}.${MINOR}.${PATCH}.${BUILD}"
           RC_FILE="version.rc"
+
           if [ -f "$RC_FILE" ]; then
             echo "Updating version.rc to $RC_STR..."
-            sed -i -E "s/FILEVERSION[ \t]+[0-9,]+/FILEVERSION     ${RC_NUM}/" "$RC_FILE"
-            sed -i -E "s/PRODUCTVERSION[ \t]+[0-9,]+/PRODUCTVERSION  ${RC_NUM}/" "$RC_FILE"
+            sed -i -E "s/FILEVERSION[ \t]+[0-9,]+/FILEVERSION ${RC_NUM}/" "$RC_FILE"
+            sed -i -E "s/PRODUCTVERSION[ \t]+[0-9,]+/PRODUCTVERSION ${RC_NUM}/" "$RC_FILE"
             sed -i -E "s/(\"FileVersion\",[ \t]*\")[0-9.]+(\".*)/\1${RC_STR}\2/" "$RC_FILE"
             sed -i -E "s/(\"ProductVersion\",[ \t]*\")[0-9.]+(\".*)/\1${RC_STR}\2/" "$RC_FILE"
           else
@@ -125,11 +164,10 @@ jobs:
 
           # 2. Build
           export PATH="$MINGW_BIN:$QT_ROOT/bin:$PATH"
-
           mkdir -p build
           cd build
           cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
-          cmake --build . 
+          cmake --build .
 
           # 3. MANUAL DEPLOYMENT
           echo "Executing manual DLL deployment..."
@@ -144,11 +182,11 @@ jobs:
 
           mkdir -p platforms
           cp "$QT_ROOT/plugins/platforms/qwindows.dll" platforms/
-          
+
           # 4. Download OpenSSL
           curl -L -o libssl-1_1-x64.dll http://hienob.bargmy.ir/openssl/libssl-1_1-x64.dll
           curl -L -o libcrypto-1_1-x64.dll http://hienob.bargmy.ir/openssl/libcrypto-1_1-x64.dll
-          
+
           # 5. Zip
           ZIP_NAME="NoveoDesktop_${VERSION}_${DATE}_x64_Windows.zip"
           7z a "$ZIP_NAME" * -xr!*.obj -xr!*.cpp -xr!*.h -xr!Makefile -xr!CMakeFiles -xr!*_autogen
@@ -164,11 +202,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # =========================================================
-  # LINUX BUILD (Fixed: Guaranteed Icon Existence)
+  # LINUX BUILD (uses icon.png 512x512 from repo root)
   # =========================================================
   build-linux:
     needs: prepare
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -188,7 +227,7 @@ jobs:
       - name: Install Deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libgl1-mesa-dev cmake wget file imagemagick
+          sudo apt-get install -y build-essential libgl1-mesa-dev cmake wget file
 
       - name: Build and Bundle
         env:
@@ -196,37 +235,31 @@ jobs:
           DATE: ${{ needs.prepare.outputs.build_date }}
         run: |
           set -e
+
           export PATH="${Qt5_Dir}/bin:$PATH"
 
           mkdir -p build
           cd build
-          
+
           cmake .. -DCMAKE_BUILD_TYPE=Release
-          cmake --build . 
-          
+          cmake --build .
+
           # Prepare AppDir
           mkdir -p AppDir/usr/bin
           mkdir -p AppDir/usr/share/applications
-          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps/
-          
+          mkdir -p AppDir/usr/share/icons/hicolor/512x512/apps/
           cp NoveoDesktop AppDir/usr/bin/
 
-          # 1. GENERATE DUMMY ICON FIRST (Prevents failure if no icon found)
-          echo "Generating fallback icon..."
-          convert -size 256x256 xc:blue AppDir/usr/share/icons/hicolor/256x256/apps/noveodesktop.png
-
-          # 2. OVERWRITE WITH REAL ICON IF EXISTS
-          if [ -f "../icon.ico" ]; then
-            echo "Found icon.ico, converting..."
-            convert "../icon.ico" -resize 256x256 AppDir/usr/share/icons/hicolor/256x256/apps/noveodesktop.png
-          elif [ -f "../icon.png" ]; then
-            echo "Found icon.png, copying..."
-            cp "../icon.png" AppDir/usr/share/icons/hicolor/256x256/apps/noveodesktop.png
+          # Icon: ONLY use icon.png from repo root (expected 512x512)
+          if [ -f "../icon.png" ]; then
+            echo "Using icon.png from repo root..."
+            cp "../icon.png" AppDir/usr/share/icons/hicolor/512x512/apps/noveodesktop.png
+          else
+            echo "WARNING: icon.png not found in repo root, continuing without custom icon."
           fi
 
-          # 3. Create Desktop File with Valid Icon Entry
-          # NOTE: Icon name must match the filename without extension (noveodesktop)
-          cat > AppDir/usr/share/applications/NoveoDesktop.desktop <<EOF
+          # Desktop file with Icon name matching noveodesktop.png (without extension)
+          cat > AppDir/usr/share/applications/NoveoDesktop.desktop << 'EOF'
           [Desktop Entry]
           Type=Application
           Name=NoveoDesktop
@@ -234,19 +267,12 @@ jobs:
           Icon=noveodesktop
           Categories=Utility;
           EOF
-          
-          # LinuxDeployQt
-          wget -c -nv https://github.com/probonopd/linuxdeployqt/releases/download/continuous/linuxdeployqt-continuous-x86_64.AppImage
-          chmod +x linuxdeployqt-continuous-x86_64.AppImage
 
-          ./linuxdeployqt-continuous-x86_64.AppImage AppDir/usr/share/applications/NoveoDesktop.desktop \
-             -appimage -unsupported-allow-new-glibc -no-translations -verbose=2
+          # Package AppDir as tar.gz
+          LINUX_TAR="NoveoDesktop_${VERSION}_${DATE}_x64_Linux.tar.gz"
+          tar czf "$LINUX_TAR" AppDir
 
-          APPIMAGE=$(ls *.AppImage | head -n 1)
-          NEW_NAME="NoveoDesktop_${VERSION}_${DATE}_x64_Ubuntu.AppImage"
-          mv "$APPIMAGE" "$NEW_NAME"
-          
-          echo "LINUX_ASSET=build/$NEW_NAME" >> $GITHUB_ENV
+          echo "LINUX_ASSET=build/$LINUX_TAR" >> $GITHUB_ENV
 
       - name: Upload Linux Asset
         uses: softprops/action-gh-release@v1
@@ -257,11 +283,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # =========================================================
-  # MACOS BUILD (Working: No Config Flag)
+  # MACOS BUILD
   # =========================================================
   build-macos:
     needs: prepare
     runs-on: macos-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -284,42 +311,44 @@ jobs:
           DATE: ${{ needs.prepare.outputs.build_date }}
         run: |
           set -e
+
           export PATH="${Qt5_Dir}/bin:$PATH"
-          
+
           mkdir -p build
           cd build
-          
-          cmake .. -DCMAKE_BUILD_TYPE=Release \
-                   -DCMAKE_PREFIX_PATH="${Qt5_Dir}" \
-                   -DCMAKE_OSX_ARCHITECTURES=x86_64
 
-          cmake --build . 
+          cmake .. -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${Qt5_Dir}" \
+            -DCMAKE_OSX_ARCHITECTURES=x86_64
+
+          cmake --build .
 
           APP_NAME="NoveoDesktop.app"
+
           mkdir -p "$APP_NAME/Contents/MacOS"
           mkdir -p "$APP_NAME/Contents/Resources"
-          
+
           cp NoveoDesktop "$APP_NAME/Contents/MacOS/"
-          
+
           if [ -f "../icon.icns" ]; then
-             cp "../icon.icns" "$APP_NAME/Contents/Resources/"
+            cp "../icon.icns" "$APP_NAME/Contents/Resources/"
           fi
-          
-          cat > "$APP_NAME/Contents/Info.plist" <<EOF
+
+          cat > "$APP_NAME/Contents/Info.plist" << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
-              <key>CFBundleExecutable</key>
-              <string>NoveoDesktop</string>
-              <key>CFBundleIdentifier</key>
-              <string>com.hienob.noveodesktop</string>
-              <key>CFBundleName</key>
-              <string>NoveoDesktop</string>
-              <key>CFBundlePackageType</key>
-              <string>APPL</string>
-              <key>CFBundleIconFile</key>
-              <string>icon.icns</string>
+            <key>CFBundleExecutable</key>
+            <string>NoveoDesktop</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.hienob.noveodesktop</string>
+            <key>CFBundleName</key>
+            <string>NoveoDesktop</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleIconFile</key>
+            <string>icon.icns</string>
           </dict>
           </plist>
           EOF
@@ -328,13 +357,13 @@ jobs:
 
           DMG_FILE=$(ls *.dmg 2>/dev/null | head -n 1 || true)
           if [ -n "$DMG_FILE" ]; then
-             NEW_DMG="NoveoDesktop_${VERSION}_${DATE}_x64_MacOS.dmg"
-             mv "$DMG_FILE" "$NEW_DMG"
-             FINAL_ASSET="$NEW_DMG"
+            NEW_DMG="NoveoDesktop_${VERSION}_${DATE}_x64_MacOS.dmg"
+            mv "$DMG_FILE" "$NEW_DMG"
+            FINAL_ASSET="$NEW_DMG"
           else
-             ZIP_NAME="NoveoDesktop_${VERSION}_${DATE}_x64_MacOS.zip"
-             zip -r "$ZIP_NAME" "$APP_NAME"
-             FINAL_ASSET="$ZIP_NAME"
+            ZIP_NAME="NoveoDesktop_${VERSION}_${DATE}_x64_MacOS.zip"
+            zip -r "$ZIP_NAME" "$APP_NAME"
+            FINAL_ASSET="$ZIP_NAME"
           fi
 
           echo "MAC_ASSET=build/$FINAL_ASSET" >> $GITHUB_ENV
