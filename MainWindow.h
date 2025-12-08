@@ -10,78 +10,84 @@
 #include <QMap>
 #include <QNetworkAccessManager>
 #include "WebSocketClient.h"
+#include "DataStructures.h"
 
-class MainWindow : public QMainWindow {
+class MainWindow : public QMainWindow
+{
     Q_OBJECT
 
 public:
-    MainWindow(QWidget *parent = nullptr);
+    explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
 
 private slots:
-    void onLoginBtnClicked();
     void onConnected();
+    void onLoginBtnClicked();
     void onLoginSuccess(const User &user, const QString &token);
     void onAuthFailed(const QString &msg);
     void onChatHistoryReceived(const std::vector<Chat> &chats);
     void onMessageReceived(const Message &msg);
     void onUserListUpdated(const std::vector<User> &users);
+    void onSendBtnClicked();
     void onNewChatCreated(const Chat &chat);
+
     void onChatSelected(QListWidgetItem *item);
     void onContactSelected(QListWidgetItem *item);
-    void onSendBtnClicked();
-    void onLogoutClicked();
     void onDarkModeToggled(bool checked);
+    void onLogoutClicked();
+    
+    // NEW: Slot for scroll detection
+    void onScrollValueChanged(int value);
 
 private:
+    void setupUi();
+    void applyTheme();
+    void renderMessages(const QString &chatId);
+    void addMessageBubble(const Message &msg, bool appendStretch, bool animate);
+    
+    // NEW: Prepend function for older messages
+    void prependMessageBubble(const Message &msg);
+    
+    QString resolveChatName(const Chat &chat);
+    QColor getColorForName(const QString &name);
+    QIcon getAvatar(const QString &name, const QString &url);
+    void scrollToBottom();
+    void smoothScrollToBottom();
+    bool isScrolledToBottom() const;
+
     WebSocketClient *m_client;
     QNetworkAccessManager *m_nam;
-    
-    QMap<QString, Chat> m_chats;
-    QMap<QString, User> m_users;
-    QString m_currentChatId;
-    bool m_isDarkMode = false;
 
     // UI Elements
     QStackedWidget *m_stackedWidget;
     QWidget *m_loginPage;
+    QWidget *m_appPage;
     QLineEdit *m_usernameInput;
     QLineEdit *m_passwordInput;
-    QLabel *m_statusLabel;
     QPushButton *m_loginBtn;
+    QLabel *m_statusLabel;
 
-    QWidget *m_appPage;
-    QTabWidget *m_sidebarTabs;
     QListWidget *m_chatListWidget;
     QListWidget *m_contactListWidget;
+    QTabWidget *m_sidebarTabs;
     QWidget *m_settingsTab;
-
     QWidget *m_chatAreaWidget;
     QLabel *m_chatTitle;
-    
-    // --- CHANGED: ScrollArea -> ListWidget ---
-    QListWidget *m_chatList; 
-    
+    QListWidget *m_chatList; // The main chat area
     QLineEdit *m_messageInput;
     QPushButton *m_sendBtn;
 
-    void setupUi();
-    void applyTheme();
-    void renderMessages(const QString &chatId);
+    // Data
+    QMap<QString, User> m_users;
+    QMap<QString, Chat> m_chats;
+    QString m_currentChatId;
+    bool m_isDarkMode;
     
-    // Modified signature (removed stretch/animate as they don't apply to ListItems easily)
-    void addMessageBubble(const Message &msg, bool appendStretch = false, bool animate = false);
-    
-    QString resolveChatName(const Chat &chat);
-    QIcon getAvatar(const QString &name, const QString &url);
-    QColor getColorForName(const QString &name);
-    
-    bool isScrolledToBottom() const;
-    void scrollToBottom();
-    void smoothScrollToBottom();
+    // NEW: Flag to prevent spamming history requests
+    bool m_isLoadingHistory = false;
 };
 
 #endif // MAINWINDOW_H
