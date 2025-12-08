@@ -8,7 +8,9 @@
 #include <QLabel>
 #include <QStackedWidget>
 #include <QMap>
+#include <QSet>
 #include <QNetworkAccessManager>
+#include <QNetworkReply>
 #include "WebSocketClient.h"
 #include "DataStructures.h"
 
@@ -53,7 +55,12 @@ private:
     
     QString resolveChatName(const Chat &chat);
     QColor getColorForName(const QString &name);
+    
+    // Avatar handling
     QIcon getAvatar(const QString &name, const QString &url);
+    QIcon generateGenericAvatar(const QString &name);
+    void updateAvatarOnItems(const QString &url, const QPixmap &pixmap);
+
     void scrollToBottom();
     void smoothScrollToBottom();
     bool isScrolledToBottom() const;
@@ -88,6 +95,10 @@ private:
     
     // NEW: Flag to prevent spamming history requests
     bool m_isLoadingHistory = false;
+
+    // Avatar Cache
+    QMap<QString, QPixmap> m_avatarCache;
+    QSet<QString> m_pendingDownloads;
 };
 
 #endif // MAINWINDOW_H

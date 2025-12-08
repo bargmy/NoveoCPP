@@ -19,6 +19,11 @@
 #include <QDateTime>
 #include <QScrollBar> 
 #include <QSet>
+#include <QNetworkRequest>
+
+// Custom role to store the avatar URL in items for updating later
+const int AvatarUrlRole = Qt::UserRole + 10;
+const QString API_BASE_URL = "https://api.pcpapc172.ir:8443";
 
 // ==========================================
 // 1. CONTACT LIST DELEGATE (Sidebar)
@@ -353,7 +358,7 @@ void MainWindow::setupUi() {
     m_stackedWidget = new QStackedWidget(this);
     setCentralWidget(m_stackedWidget);
 
-    // --- Login Page ---
+    // --- Login Page -----
     m_loginPage = new QWidget();
     QVBoxLayout *loginLayout = new QVBoxLayout(m_loginPage);
     
@@ -382,7 +387,7 @@ void MainWindow::setupUi() {
     loginLayout->setContentsMargins(300, 50, 300, 50);
     m_stackedWidget->addWidget(m_loginPage);
 
-    // --- App Page ---
+    // --- App Page -----
     m_appPage = new QWidget();
     QHBoxLayout *appLayout = new QHBoxLayout(m_appPage);
     appLayout->setContentsMargins(0,0,0,0);
@@ -528,14 +533,12 @@ void MainWindow::applyTheme() {
 
 // NEW: Slot to handle scroll up for history
 void MainWindow::onScrollValueChanged(int value) {
-    // If scrolled to top (0), not already loading, and we have an active chat
     if (value == 0 && !m_isLoadingHistory && !m_currentChatId.isEmpty()) {
         if (m_chats.contains(m_currentChatId)) {
             const auto &msgs = m_chats[m_currentChatId].messages;
             if (!msgs.empty()) {
                 qint64 oldestTime = msgs.front().timestamp;
                 m_isLoadingHistory = true;
-                // Request older messages from server
                 m_client->fetchHistory(m_currentChatId, oldestTime);
             }
         }
@@ -553,37 +556,32 @@ void MainWindow::onDarkModeToggled(bool checked) {
 }
 
 void MainWindow::onLogoutClicked() {
-    // 1. Clear Settings
     QSettings settings("Noveo", "MessengerClient");
     settings.remove("username");
     settings.remove("password");
 
-    // 2. Clear UI Inputs
     m_usernameInput->clear();
     m_passwordInput->clear();
 
-    // 3. Clear Data structures
     m_chats.clear();
     m_users.clear();
     m_currentChatId.clear();
     m_isLoadingHistory = false;
+    m_avatarCache.clear();
+    m_pendingDownloads.clear();
 
-    // 4. Clear UI Lists
     m_chatListWidget->clear();
     m_contactListWidget->clear();
     m_chatList->clear();
     m_chatTitle->setText("Select a chat");
 
-    // 5. Reset Client Connection (Close and Reconnect)
-    m_loginBtn->setEnabled(false); // Disable login until reconnected
+    m_loginBtn->setEnabled(false);
     m_statusLabel->setText("Resetting connection...");
 
-    m_client->logout(); // Close socket and clear token
+    m_client->logout(); 
 
-    // 6. Switch View
     m_stackedWidget->setCurrentWidget(m_loginPage);
 
-    // 7. Reconnect after short delay to ensure clean state
     QTimer::singleShot(500, m_client, &WebSocketClient::connectToServer);
 }
 
@@ -625,14 +623,25 @@ void MainWindow::onUserListUpdated(const std::vector<User> &users) {
         QListWidgetItem *item = new QListWidgetItem(m_contactListWidget);
         item->setText(u.username);
         item->setData(Qt::UserRole, u.userId);
+        
+        // --- UPDATED AVATAR LOGIC ---
+        QString url = u.avatarUrl;
+        if (url.startsWith("/")) url = API_BASE_URL + url;
+        item->setData(AvatarUrlRole, url); // Store resolved URL for future updates
         item->setIcon(getAvatar(u.username, u.avatarUrl));
     }
+    
+    // Refresh Sidebar Chats
     for(int i=0; i<m_chatListWidget->count(); i++) {
         QListWidgetItem *item = m_chatListWidget->item(i);
         QString chatId = item->data(Qt::UserRole).toString();
         if(m_chats.contains(chatId)) {
             QString name = resolveChatName(m_chats[chatId]);
+            QString url = m_chats[chatId].avatarUrl;
+            if (url.startsWith("/")) url = API_BASE_URL + url;
+            
             item->setText(name);
+            item->setData(AvatarUrlRole, url);
             item->setIcon(getAvatar(name, m_chats[chatId].avatarUrl));
         }
     }
@@ -641,17 +650,12 @@ void MainWindow::onUserListUpdated(const std::vector<User> &users) {
 void MainWindow::onChatHistoryReceived(const std::vector<Chat> &incomingChats) {
     bool initialLoad = m_chats.isEmpty();
     
-    // Merge new chats/messages into existing data
     for (const auto &inChat : incomingChats) {
         if (m_chats.contains(inChat.chatId)) {
-            // Existing chat: Merge messages
             Chat &existingChat = m_chats[inChat.chatId];
-            
-            // Create a set of existing IDs for fast lookup
             QSet<QString> existingIds;
             for(const auto &m : existingChat.messages) existingIds.insert(m.messageId);
 
-            // Add ONLY new messages (which are likely older ones from history fetch)
             std::vector<Message> newMessages;
             for(const auto &m : inChat.messages) {
                 if (!existingIds.contains(m.messageId)) {
@@ -660,65 +664,30 @@ void MainWindow::onChatHistoryReceived(const std::vector<Chat> &incomingChats) {
             }
             
             if (!newMessages.empty()) {
-                // Append new ones
                 existingChat.messages.insert(existingChat.messages.end(), newMessages.begin(), newMessages.end());
-                // Re-sort all by timestamp
                 std::sort(existingChat.messages.begin(), existingChat.messages.end(), [](const Message &a, const Message &b){
                     return a.timestamp < b.timestamp;
                 });
                 
-                // If this is the active chat and we were loading history, update UI
                 if (m_currentChatId == inChat.chatId && m_isLoadingHistory) {
-                    // Turn off flag
                     m_isLoadingHistory = false;
-                    
-                    // We need to prepend these new (older) messages to the UI
-                    // Sort the NEW messages only to insert them in order
                     std::sort(newMessages.begin(), newMessages.end(), [](const Message &a, const Message &b){
-                        return a.timestamp > b.timestamp; // Reverse for insertion at top (newest of the old at index 0? No.)
+                        return a.timestamp < b.timestamp; 
                     });
-                    // Actually, we want them at the TOP. 
-                    // Example:
-                    // UI: [Msg 10] [Msg 11]
-                    // History: [Msg 8] [Msg 9]
-                    // We want: [Msg 8] [Msg 9] [Msg 10] [Msg 11]
-                    // So we iterate backwards (Msg 9 then Msg 8) and insert at 0?
-                    // No, insert [Msg 9] at 0 -> [Msg 9] [Msg 10]
-                    // Then insert [Msg 8] at 0 -> [Msg 8] [Msg 9] [Msg 10]
-                    // So we need to sort newMessages by timestamp DESCENDING and insert at 0.
-                    
-                    std::sort(newMessages.begin(), newMessages.end(), [](const Message &a, const Message &b){
-                        return a.timestamp < b.timestamp; // Ascending: 8, 9
-                    });
-                    
-                    // Save scroll height before insertion
                     int oldMax = m_chatList->verticalScrollBar()->maximum();
-                    
-                    // Insert from newest-old to oldest-old?
-                    // 8, 9. 
-                    // Insert 9 at 0. List: 9, 10, 11
-                    // Insert 8 at 0. List: 8, 9, 10, 11. Correct.
-                    // So reverse iterate the ascending list
                     for (auto it = newMessages.rbegin(); it != newMessages.rend(); ++it) {
                         prependMessageBubble(*it);
                     }
-                    
-                    // Restore scroll position
-                    // The content grew by (newMax - oldMax).
-                    // We were at 0. We should be at (newMax - oldMax).
-                    // This keeps the view on the "Msg 10" which was at top.
                     int newMax = m_chatList->verticalScrollBar()->maximum();
                     m_chatList->verticalScrollBar()->setValue(newMax - oldMax);
                 }
             }
             
         } else {
-            // New chat entirely
             m_chats.insert(inChat.chatId, inChat);
         }
     }
 
-    // Refresh Sidebar List (Only if initial or new chat added)
     if (initialLoad) {
         m_chatListWidget->clear();
         std::vector<Chat> sortedChats;
@@ -733,8 +702,12 @@ void MainWindow::onChatHistoryReceived(const std::vector<Chat> &incomingChats) {
         for (const auto &chat : sortedChats) {
             QListWidgetItem *item = new QListWidgetItem(m_chatListWidget);
             QString name = resolveChatName(chat);
+            QString url = chat.avatarUrl;
+            if (url.startsWith("/")) url = API_BASE_URL + url;
+            
             item->setText(name);
             item->setData(Qt::UserRole, chat.chatId);
+            item->setData(AvatarUrlRole, url);
             item->setIcon(getAvatar(name, chat.avatarUrl));
             m_chatListWidget->addItem(item);
         }
@@ -746,8 +719,12 @@ void MainWindow::onNewChatCreated(const Chat &chat) {
         m_chats.insert(chat.chatId, chat);
         QListWidgetItem *item = new QListWidgetItem(m_chatListWidget);
         QString name = resolveChatName(chat);
+        QString url = chat.avatarUrl;
+        if (url.startsWith("/")) url = API_BASE_URL + url;
+
         item->setText(name);
         item->setData(Qt::UserRole, chat.chatId);
+        item->setData(AvatarUrlRole, url);
         item->setIcon(getAvatar(name, chat.avatarUrl));
         m_chatListWidget->insertItem(0, item);
     }
@@ -779,8 +756,9 @@ QColor MainWindow::getColorForName(const QString &name) {
     return colors[hash % colors.size()];
 }
 
-QIcon MainWindow::getAvatar(const QString &name, const QString &url) {
-    Q_UNUSED(url);
+// --- MODIFIED AVATAR LOGIC START ---
+
+QIcon MainWindow::generateGenericAvatar(const QString &name) {
     QPixmap pixmap(42, 42);
     pixmap.fill(Qt::transparent);
     QPainter painter(&pixmap);
@@ -797,6 +775,82 @@ QIcon MainWindow::getAvatar(const QString &name, const QString &url) {
     painter.drawText(QRect(0, 0, 42, 42), Qt::AlignCenter, letter);
     return QIcon(pixmap);
 }
+
+QIcon MainWindow::getAvatar(const QString &name, const QString &urlIn) {
+    // 1. Check Ignore List (The default avatar)
+    if (urlIn.isEmpty() || urlIn.contains("default.png")) {
+        return generateGenericAvatar(name);
+    }
+
+    // 2. Resolve URL
+    QString url = urlIn;
+    if (url.startsWith("/")) {
+        url = API_BASE_URL + url;
+    }
+
+    // 3. Check Cache
+    if (m_avatarCache.contains(url)) {
+        return QIcon(m_avatarCache[url]);
+    }
+
+    // 4. Download if not pending
+    if (!m_pendingDownloads.contains(url)) {
+        m_pendingDownloads.insert(url);
+        QNetworkRequest request((QUrl(url)));
+        QNetworkReply *reply = m_nam->get(request);
+        
+        connect(reply, &QNetworkReply::finished, this, [this, reply, url](){
+            reply->deleteLater();
+            m_pendingDownloads.remove(url);
+            
+            if (reply->error() == QNetworkReply::NoError) {
+                QByteArray data = reply->readAll();
+                QPixmap pixmap;
+                if (pixmap.loadFromData(data)) {
+                    // Scale it to nice size and make it circular or just store it
+                    // For better visuals, let's just store it. Delegate handles resizing to 40x40.
+                    // But we might want to apply a circle mask here if we want round avatars for images too.
+                    // For now, let's keep it simple as requested.
+                    
+                    // Create circular version
+                    QPixmap circular(42, 42);
+                    circular.fill(Qt::transparent);
+                    QPainter p(&circular);
+                    p.setRenderHint(QPainter::Antialiasing);
+                    QPainterPath path;
+                    path.addEllipse(0, 0, 42, 42);
+                    p.setClipPath(path);
+                    p.drawPixmap(0, 0, 42, 42, pixmap.scaled(42, 42, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
+                    
+                    m_avatarCache.insert(url, circular);
+                    updateAvatarOnItems(url, circular); 
+                }
+            }
+        });
+    }
+
+    // 5. Return placeholder while loading
+    return generateGenericAvatar(name);
+}
+
+void MainWindow::updateAvatarOnItems(const QString &url, const QPixmap &pixmap) {
+    QIcon icon(pixmap);
+    
+    auto updateList = [&](QListWidget *list) {
+        for(int i=0; i < list->count(); ++i) {
+             QListWidgetItem *item = list->item(i);
+             if (item->data(AvatarUrlRole).toString() == url) {
+                 item->setIcon(icon);
+             }
+        }
+    };
+    
+    updateList(m_chatListWidget);
+    updateList(m_contactListWidget);
+    updateList(m_chatList);
+}
+
+// --- MODIFIED AVATAR LOGIC END ---
 
 void MainWindow::scrollToBottom() {
     if (m_chatList->count() > 0)
@@ -853,7 +907,6 @@ void MainWindow::renderMessages(const QString &chatId) {
     scrollToBottom();
 }
 
-// NEW: Helper to add bubble at the top (for history)
 void MainWindow::prependMessageBubble(const Message &msg) {
     bool isMe = (msg.senderId == m_client->currentUserId());
     
@@ -864,17 +917,20 @@ void MainWindow::prependMessageBubble(const Message &msg) {
         avatarUrl = m_users[msg.senderId].avatarUrl;
     }
 
-    QListWidgetItem *item = new QListWidgetItem(); // No parent initially
+    QListWidgetItem *item = new QListWidgetItem(); 
     item->setData(Qt::UserRole + 1, msg.text);
     item->setData(Qt::UserRole + 2, senderName);
     item->setData(Qt::UserRole + 3, msg.timestamp);
     item->setData(Qt::UserRole + 4, isMe);
     
     if (!isMe) {
+        // --- UPDATED ---
+        QString url = avatarUrl;
+        if (url.startsWith("/")) url = API_BASE_URL + url;
+        item->setData(AvatarUrlRole, url);
         item->setIcon(getAvatar(senderName, avatarUrl));
     }
     
-    // Insert at index 0
     m_chatList->insertItem(0, item);
 }
 
@@ -898,6 +954,10 @@ void MainWindow::addMessageBubble(const Message &msg, bool appendStretch, bool a
     item->setData(Qt::UserRole + 4, isMe);
     
     if (!isMe) {
+        // --- UPDATED ---
+        QString url = avatarUrl;
+        if (url.startsWith("/")) url = API_BASE_URL + url;
+        item->setData(AvatarUrlRole, url);
         item->setIcon(getAvatar(senderName, avatarUrl));
     }
 }
