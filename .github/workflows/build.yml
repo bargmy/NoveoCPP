@@ -1,4 +1,4 @@
-name: Build Release (Windows & Linux)
+name: Build Windows & Linux Release
 
 permissions:
   contents: write
@@ -10,29 +10,28 @@ on:
 
 jobs:
   prepare:
+    # Runs on both release events and manual dispatches.
     runs-on: ubuntu-latest
     outputs:
       new_version: ${{ steps.setver.outputs.new_version }}
-      build_date: ${{ steps.date.outputs.date }}
     steps:
-      - name: Checkout
+      - name: Checkout (full)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Get Date
-        id: date
-        run: echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
-
-      - name: Determine or bump tag
+      - name: Determine or bump tag and push (if dispatch)
         id: setver
         env:
           REPO: ${{ github.repository }}
+          # Optional: set a secret REPO_PAT for reliable push permissions (preferred).
           REPO_PAT: ${{ secrets.REPO_PAT }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
+          echo "event: $GITHUB_EVENT_NAME"
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "Manual dispatch -> bumping patch version and creating tag."
             latest=$(git tag -l "v*" --sort=-v:refname | head -n 1)
             if [ -z "$latest" ]; then
               new="v1.0.0"
@@ -42,47 +41,59 @@ jobs:
               rest=${base#*.}
               minor=${rest%%.*}
               patch=${rest##*.}
+              # Increment patch
               patch=$((patch + 1))
+              # Check if patch > 15 -> Reset patch, increment minor
               if [ "$patch" -gt 15 ]; then
                 patch=0
                 minor=$((minor + 1))
               fi
+              # Check if minor > 99 -> Reset minor, increment major
               if [ "$minor" -gt 99 ]; then
                 minor=0
                 major=$((major + 1))
               fi
               new="v$major.$minor.$patch"
             fi
-            echo "New tag: $new"
-            
+            echo "New tag will be: $new"
+
+            # Choose auth token
             if [ -n "$REPO_PAT" ]; then
               AUTH_TOKEN="$REPO_PAT"
+              echo "Using REPO_PAT secret for pushing."
             else
               AUTH_TOKEN="$GITHUB_TOKEN"
+              echo "Using GITHUB_TOKEN for pushing (requires repo Actions permission: Read & write)."
             fi
-            
+
             git config user.name "github-actions"
             git config user.email "github-actions@github.com"
+            # Use token-authenticated remote so we can push tags
             git remote set-url origin https://${AUTH_TOKEN}@github.com/${REPO}.git
             git tag "$new"
             git push origin "$new"
             echo "new_version=$new" >> $GITHUB_OUTPUT
           else
+            # release event -> use tag from the event (GITHUB_REF = refs/tags/)
             refname=${GITHUB_REF##*/}
-            echo "Release event: $refname"
+            echo "Release event detected, using tag: $refname"
             echo "new_version=$refname" >> $GITHUB_OUTPUT
           fi
 
+  # ===== Windows job: unchanged =====
   build-windows:
     needs: prepare
     runs-on: windows-latest
+
     steps:
-      - name: Checkout
+      - name: Checkout the tag
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
+          # Check out the tag created/selected by `prepare`
           ref: ${{ needs.prepare.outputs.new_version }}
 
-      - name: Install Qt
+      - name: Install Qt (MinGW 8.1.0)
         uses: jurplel/install-qt-action@v3
         with:
           version: '5.15.2'
@@ -90,61 +101,114 @@ jobs:
           target: 'desktop'
           arch: 'win64_mingw81'
           install-deps: 'true'
+          tools: 'tools_mingw,qt.tools.win64_mingw810'
 
-      - name: Build and Package
+      - name: Build and Package (MinGW)
         shell: bash
         env:
           QT_ROOT: ${{ env.Qt5_Dir }}
-          VERSION: ${{ needs.prepare.outputs.new_version }}
-          DATE: ${{ needs.prepare.outputs.build_date }}
+          MINGW_BIN: ${{ env.IQTA_TOOLS }}/mingw810_64/bin
         run: |
           set -e
-          export PATH="${{ env.IQTA_TOOLS }}/mingw810_64/bin:$QT_ROOT/bin:$PATH"
-          
+          echo "Qt5_Dir = ${Qt5_Dir}"
+          echo "IQTA_TOOLS = ${IQTA_TOOLS}"
+
+          export QT_ROOT="${Qt5_Dir}"
+          export MINGW_BIN="${IQTA_TOOLS}/mingw810_64/bin"
+          export PATH="$MINGW_BIN:$QT_ROOT/bin:$PATH"
+          export QT_PLUGIN_PATH="${QT_ROOT}/plugins"
+
           mkdir -p build
           cd build
+          echo "Configuring project..."
           cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+          echo "Building..."
           cmake --build . --config Release
 
-          # Deployment
+          echo "Running windeployqt (will copy Qt DLLs & plugins)..."
+          # Use full path to windeployqt.exe
           "$QT_ROOT/bin/windeployqt.exe" --release --no-translations --no-compiler-runtime --dir . ./NoveoDesktop.exe || true
 
-          # OpenSSL
+          # --- FIX: DOWNLOAD INDIVIDUAL OPENSSL DLLs FROM YOUR SERVER ---
+          echo "Downloading OpenSSL DLLs from hienob.bargmy.ir..."
+          # Download libssl
           curl -L -o libssl-1_1-x64.dll http://hienob.bargmy.ir/openssl/libssl-1_1-x64.dll
+          # Download libcrypto
           curl -L -o libcrypto-1_1-x64.dll http://hienob.bargmy.ir/openssl/libcrypto-1_1-x64.dll
 
-          # MinGW Runtimes
-          MINGW_BIN="${{ env.IQTA_TOOLS }}/mingw810_64/bin"
+          # Verify files exist and have size > 0
+          if [ ! -s "libssl-1_1-x64.dll" ] || [ ! -s "libcrypto-1_1-x64.dll" ]; then
+            echo "ERROR: OpenSSL DLLs failed to download (empty or missing)."
+            ls -l *.dll
+            exit 1
+          fi
+          echo "OpenSSL Download Successful."
+          # --- FIX END ---
+
+          # Fallback: ensure core Qt DLLs are present (sometimes windeployqt misses due to env)
+          for dll in Qt5Core.dll Qt5Gui.dll Qt5Network.dll Qt5WebSockets.dll Qt5Widgets.dll; do
+            if [ ! -f "$dll" ]; then
+              if [ -f "$QT_ROOT/bin/$dll" ]; then
+                echo "Copying $dll from Qt bin"
+                cp "$QT_ROOT/bin/$dll" .
+              else
+                echo "Warning: $dll not found in target dir nor in $QT_ROOT/bin"
+              fi
+            fi
+          done
+
+          # Ensure platform plugin is present
+          if [ ! -d "platforms" ] || [ ! -f "platforms/qwindows.dll" ]; then
+            echo "platforms/qwindows.dll missing -> attempting to copy"
+            mkdir -p platforms
+            if [ -f "$QT_ROOT/plugins/platforms/qwindows.dll" ]; then
+              cp "$QT_ROOT/plugins/platforms/qwindows.dll" platforms/
+            else
+              echo "Warning: qwindows.dll not found at $QT_ROOT/plugins/platforms"
+            fi
+          fi
+
+          # Copy MinGW runtimes as before
+          echo "Copying MinGW runtimes..."
           cp "$MINGW_BIN/libgcc_s_seh-1.dll" . || true
           cp "$MINGW_BIN/libstdc++-6.dll" . || true
           cp "$MINGW_BIN/libwinpthread-1.dll" . || true
 
-          # Construct Name: NoveoDesktop_{version}_{date}_{arch}_{OS}.zip
-          ZIP_NAME="NoveoDesktop_${VERSION}_${DATE}_x64_Windows.zip"
+          VERSION=${{ needs.prepare.outputs.new_version }}
+          ZIP_NAME="NoveoDesktop-${VERSION}.zip"
           echo "Creating ZIP: $ZIP_NAME"
-          
+
+          # 7z is available on Windows runner images
           7z a "$ZIP_NAME" * -xr!*.obj -xr!*.cpp -xr!*.h -xr!Makefile -xr!CMakeFiles -xr!*_autogen
 
-          echo "WIN_ASSET_PATH=build/$ZIP_NAME" >> $GITHUB_ENV
-
-      - name: Upload Release
+      - name: Upload ZIP to Release (create/update asset)
         uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: ${{ env.WIN_ASSET_PATH }}
+          tag_name: ${{ needs.prepare.outputs.new_version }}
+          name: "NoveoDesktop Windows Release - ${{ needs.prepare.outputs.new_version }}"
+          files: build/NoveoDesktop-${{ needs.prepare.outputs.new_version }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Upload Build Artifact (fallback)
+        uses: actions/upload-artifact@v4
+        with:
+          name: NoveoDesktop-Windows-${{ needs.prepare.outputs.new_version }}
+          path: build/NoveoDesktop-${{ needs.prepare.outputs.new_version }}.zip
+
+  # ===== New Linux job =====
   build-linux:
     needs: prepare
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout
+      - name: Checkout the tag
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           ref: ${{ needs.prepare.outputs.new_version }}
 
-      - name: Install Qt
+      - name: Install Qt (Linux)
         uses: jurplel/install-qt-action@v3
         with:
           version: '5.15.2'
@@ -153,41 +217,51 @@ jobs:
           arch: 'gcc_64'
           install-deps: 'true'
 
-      - name: Install System Deps
+      - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential libgl1-mesa-dev cmake
 
-      - name: Build
+      - name: Build and Package (Linux)
         env:
           VERSION: ${{ needs.prepare.outputs.new_version }}
-          DATE: ${{ needs.prepare.outputs.build_date }}
         run: |
-          mkdir build
-          cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release
-          cmake --build . --config Release
-          
-          # Prepare Artifact Folder
-          # Name: NoveoDesktop_{version}_{date}_{arch}_{OS}
-          FOLDER_NAME="NoveoDesktop_${VERSION}_${DATE}_x64_Ubuntu"
-          mkdir "$FOLDER_NAME"
-          
-          # Copy executable
-          cp NoveoDesktop "$FOLDER_NAME/"
-          
-          # Note: For a truly portable Linux build, you might need linuxdeployqt or AppImage.
-          # For now, we allow the system to use installed libs or relative libs if configured.
-          
-          # Zip it
-          zip -r "${FOLDER_NAME}.zip" "$FOLDER_NAME"
-          
-          echo "LINUX_ASSET_PATH=build/${FOLDER_NAME}.zip" >> $GITHUB_ENV
+          set -e
+          DATE="$(date +%Y%m%d)"
 
-      - name: Upload Release
+          ARCH="$(uname -m)"
+          case "$ARCH" in
+            x86_64) ARCH_LABEL="x64" ;;
+            aarch64) ARCH_LABEL="arm64" ;;
+            armv7l|armv6l) ARCH_LABEL="arm32" ;;
+            *) ARCH_LABEL="$ARCH" ;;
+          esac
+
+          mkdir -p build
+          cd build
+
+          echo "Configuring project..."
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          echo "Building..."
+          cmake --build . --config Release
+
+          OUT_NAME="NoveoDesktop_${VERSION}_${DATE}_${ARCH_LABEL}_Ubuntu"
+          mkdir "$OUT_NAME"
+
+          # Adjust this path if your binary lives somewhere else
+          if [ -f "NoveoDesktop" ]; then
+            cp NoveoDesktop "$OUT_NAME/"
+          elif [ -f "src/NoveoDesktop" ]; then
+            cp src/NoveoDesktop "$OUT_NAME/"
+          fi
+
+          zip -r "${OUT_NAME}.zip" "$OUT_NAME"
+          echo "LINUX_ZIP=build/${OUT_NAME}.zip" >> $GITHUB_ENV
+
+      - name: Upload Linux ZIP to Release
         uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: ${{ env.LINUX_ASSET_PATH }}
+          tag_name: ${{ needs.prepare.outputs.new_version }}
+          files: ${{ env.LINUX_ZIP }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
