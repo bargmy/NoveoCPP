@@ -1,5 +1,4 @@
 cmake_minimum_required(VERSION 3.10)
-# Change Project Name
 project(NoveoDesktop LANGUAGES CXX) 
 
 set(CMAKE_CXX_STANDARD 17)
@@ -15,6 +14,7 @@ set(SOURCES
     MainWindow.cpp
     WebSocketClient.cpp
     MessageBubble.cpp
+    version.rc
 )
 
 set(HEADERS
@@ -24,6 +24,7 @@ set(HEADERS
     MessageBubble.h
 )
 
-# Change Executable Name here too
-add_executable(NoveoDesktop ${SOURCES} ${HEADERS})
+# Added WIN32 here to hide the console window
+add_executable(NoveoDesktop WIN32 ${SOURCES} ${HEADERS})
+
 target_link_libraries(NoveoDesktop PRIVATE Qt5::Widgets Qt5::Network Qt5::WebSockets Qt5::Gui)
