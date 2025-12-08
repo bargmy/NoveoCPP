@@ -22,8 +22,10 @@ set(HEADERS
     WebSocketClient.h
     DataStructures.h
     MessageBubble.h
+    UserListDelegate.h
 )
 
 # Change Executable Name here too
 add_executable(NoveoDesktop ${SOURCES} ${HEADERS})
 target_link_libraries(NoveoDesktop PRIVATE Qt5::Widgets Qt5::Network Qt5::WebSockets Qt5::Gui)
+
