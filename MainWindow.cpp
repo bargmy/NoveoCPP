@@ -1,5 +1,6 @@
 #include "MainWindow.h"
-#include "MessageBubble.h"
+// MessageBubble.h is no longer needed for rendering, but we keep the file if you want
+// We now use a Delegate for chat messages.
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -8,36 +9,32 @@
 #include <QPushButton>
 #include <QListWidget>
 #include <QStackedWidget>
-#include <QScrollArea>
-#include <QScrollBar>
 #include <QTabWidget>
 #include <QSettings>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QJsonArray>
 #include <QTimer>
-#include <QGraphicsOpacityEffect>
-#include <QPropertyAnimation>
 #include <QPainter>
 #include <QStyledItemDelegate>
 #include <QRegularExpression>
 #include <QCheckBox>
-#include <QApplication> // <--- ADDED THIS TO FIX INCOMPLETE TYPE ERROR
+#include <QApplication>
+#include <QTextDocument>
+#include <QAbstractTextDocumentLayout>
+#include <QDateTime>
 
-// --- Custom Delegate for Efficient List Rendering & Nametags ---
+// ==========================================
+// 1. CONTACT LIST DELEGATE (Sidebar)
+// ==========================================
 class UserListDelegate : public QStyledItemDelegate {
 public:
     using QStyledItemDelegate::QStyledItemDelegate;
 
     void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override {
         painter->save();
-
-        // 1. Draw Background (handles hover/selection)
+        
         QStyleOptionViewItem opt = option;
         initStyleOption(&opt, index);
         option.widget->style()->drawPrimitive(QStyle::PE_PanelItemViewItem, &opt, painter, option.widget);
 
-        // 2. Extract Data
         QString fullText = index.data(Qt::DisplayRole).toString();
         QIcon icon = qvariant_cast<QIcon>(index.data(Qt::DecorationRole));
         
@@ -45,18 +42,16 @@ public:
         const int padding = 10;
         const int iconSize = 40;
 
-        // 3. Draw Icon
         if (!icon.isNull()) {
             int iconY = rect.top() + (rect.height() - iconSize) / 2;
             icon.paint(painter, rect.left() + padding, iconY, iconSize, iconSize);
         }
 
-        // 4. Parse Nametag: Name [#color, "Tag"]
-        // CHANGED: Using standard escaped string instead of raw string to avoid compiler errors
+        // Regex for Nametag
         static QRegularExpression regex("^(.*)\\s\\[#([a-fA-F0-9]{6}),\\s*\"(.*)\"\\]$");
         QRegularExpressionMatch match = regex.match(fullText);
 
-        QString name;
+        QString name = fullText;
         QString tagText;
         QColor tagColor;
         bool hasTag = false;
@@ -66,27 +61,24 @@ public:
             tagColor = QColor("#" + match.captured(2));
             tagText = match.captured(3);
             hasTag = true;
-        } else {
-            name = fullText;
         }
 
-        // 5. Draw Name
+        // Draw Name
         QColor textColor = (opt.state & QStyle::State_Selected) ? Qt::white : opt.palette.text().color();
         painter->setPen(textColor);
-
         QFont nameFont = opt.font;
         nameFont.setPixelSize(14);
         painter->setFont(nameFont);
 
         int textX = rect.left() + padding + iconSize + padding;
-        
         QFontMetrics fm(nameFont);
         int nameWidth = fm.horizontalAdvance(name);
-        QRect nameRect(textX, rect.top(), nameWidth, rect.height());
         
-        painter->drawText(nameRect, Qt::AlignVCenter | Qt::AlignLeft, name);
+        // Vertically center text
+        int textY = rect.top() + (rect.height() - fm.height()) / 2 + fm.ascent();
+        painter->drawText(textX, textY, name);
 
-        // 6. Draw Nametag (if present)
+        // Draw Tag
         if (hasTag) {
             int tagX = textX + nameWidth + 8;
             int tagH = 18;
@@ -98,12 +90,10 @@ public:
             QFontMetrics tagFm(tagFont);
             int tagW = tagFm.horizontalAdvance(tagText) + 12;
 
-            // Draw Tag Background
             painter->setBrush(tagColor);
             painter->setPen(Qt::NoPen);
             painter->drawRoundedRect(tagX, tagY, tagW, tagH, 4, 4);
 
-            // Draw Tag Text
             painter->setPen(Qt::white); 
             painter->setFont(tagFont);
             painter->drawText(QRect(tagX, tagY, tagW, tagH), Qt::AlignCenter, tagText);
@@ -113,23 +103,181 @@ public:
     }
 
     QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override {
-        return QSize(option.rect.width(), 60); // Consistent item height
+        Q_UNUSED(index);
+        return QSize(option.rect.width(), 60); 
     }
 };
 
-// --- MainWindow Implementation ---
+// ==========================================
+// 2. MESSAGE DELEGATE (Chat Area) - The Fix for Lag
+// ==========================================
+class MessageDelegate : public QStyledItemDelegate {
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+
+    // Helper to calculate bubble geometry
+    void getBubbleLayout(const QString &text, const QString &sender, bool isMe, int viewWidth, 
+                         QRect &bubbleRect, QRect &textRect, QRect &nameRect, int &neededHeight) const {
+        
+        int maxBubbleWidth = viewWidth * 0.70; // Max 70% of screen width
+        int padding = 10;
+        int nameHeight = isMe ? 0 : 15; // Space for name if not me
+        int timeHeight = 12;
+        int bubblePadding = 16; // 8px top + 8px bottom
+
+        // Calculate Text Height using QTextDocument (handles wrapping)
+        QTextDocument doc;
+        doc.setDefaultFont(QFont("Segoe UI", 10)); // Adjust font size here
+        doc.setPlainText(text);
+        doc.setTextWidth(maxBubbleWidth - 20); // Inner padding
+        
+        int textWidth = doc.idealWidth();
+        int textHeight = doc.size().height();
+
+        // Calculate total bubble dimensions
+        int bubbleW = qMax(textWidth + 20, 100); // Min width
+        int bubbleH = textHeight + nameHeight + timeHeight + bubblePadding;
+
+        neededHeight = bubbleH + 10; // +10 for external margin
+
+        // Position
+        int x = isMe ? (viewWidth - bubbleW - 20) : 10; // Right or Left aligned
+        bubbleRect = QRect(x, 5, bubbleW, bubbleH);
+        
+        if (!isMe) {
+            nameRect = QRect(x + 10, 5 + 5, bubbleW - 20, 15);
+            textRect = QRect(x + 10, 5 + 20, bubbleW - 20, textHeight);
+        } else {
+            textRect = QRect(x + 10, 5 + 8, bubbleW - 20, textHeight);
+        }
+    }
+
+    void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override {
+        painter->save();
+        painter->setRenderHint(QPainter::Antialiasing);
+
+        // Retrieve data
+        QString text = index.data(Qt::UserRole + 1).toString();
+        QString sender = index.data(Qt::UserRole + 2).toString();
+        qint64 timestamp = index.data(Qt::UserRole + 3).toLongLong();
+        bool isMe = index.data(Qt::UserRole + 4).toBool();
+
+        QRect bubbleRect, textRect, nameRect;
+        int neededHeight;
+        getBubbleLayout(text, sender, isMe, option.rect.width(), bubbleRect, textRect, nameRect, neededHeight);
+
+        // Adjust rect to current item position
+        bubbleRect.translate(0, option.rect.top());
+        textRect.translate(0, option.rect.top());
+        nameRect.translate(0, option.rect.top());
+
+        // Draw Bubble Background
+        QColor bubbleColor = isMe ? QColor("#EEFFDE") : Qt::white;
+        painter->setBrush(bubbleColor);
+        painter->setPen(QPen(QColor("#d0d0d0"), 1));
+        painter->drawRoundedRect(bubbleRect, 10, 10);
+
+        // Draw Name (if not me)
+        if (!isMe) {
+            // Regex for Nametag in Chat
+            static QRegularExpression regex("^(.*)\\s\\[#([a-fA-F0-9]{6}),\\s*\"(.*)\"\\]$");
+            QRegularExpressionMatch match = regex.match(sender);
+            
+            QString displayName = sender;
+            QString tagText;
+            QColor tagColor;
+            bool hasTag = false;
+
+            if (match.hasMatch()) {
+                displayName = match.captured(1).trimmed();
+                tagColor = QColor("#" + match.captured(2));
+                tagText = match.captured(3);
+                hasTag = true;
+            }
+
+            // Draw Display Name
+            painter->setPen(QColor("#E35967"));
+            QFont nameFont = option.font;
+            nameFont.setPixelSize(11);
+            nameFont.setBold(true);
+            painter->setFont(nameFont);
+            
+            QFontMetrics fm(nameFont);
+            int nameW = fm.horizontalAdvance(displayName);
+            painter->drawText(nameRect.left(), nameRect.top() + fm.ascent(), displayName);
+
+            // Draw Tag
+            if (hasTag) {
+                int tagX = nameRect.left() + nameW + 5;
+                int tagY = nameRect.top(); // Align top
+                int tagW = fm.horizontalAdvance(tagText) + 10;
+                int tagH = 14;
+
+                painter->setBrush(tagColor);
+                painter->setPen(Qt::NoPen);
+                painter->drawRoundedRect(tagX, tagY, tagW, tagH, 3, 3);
+
+                painter->setPen(Qt::white);
+                QFont tagFont = nameFont;
+                tagFont.setPixelSize(9);
+                painter->setFont(tagFont);
+                painter->drawText(QRect(tagX, tagY, tagW, tagH), Qt::AlignCenter, tagText);
+            }
+        }
+
+        // Draw Message Text
+        painter->setPen(Qt::black);
+        QTextDocument doc;
+        QFont textFont("Segoe UI", 10); // Standard font size
+        doc.setDefaultFont(textFont);
+        doc.setPlainText(text);
+        doc.setTextWidth(textRect.width());
+        
+        painter->translate(textRect.topLeft());
+        doc.drawContents(painter);
+        painter->translate(-textRect.topLeft());
+
+        // Draw Timestamp
+        QDateTime dt;
+        dt.setSecsSinceEpoch(timestamp);
+        QString timeStr = dt.toString("hh:mm AP");
+        
+        painter->setPen(QColor("#888888"));
+        QFont timeFont = option.font;
+        timeFont.setPixelSize(9);
+        painter->setFont(timeFont);
+        
+        // Bottom right of bubble
+        painter->drawText(bubbleRect.adjusted(0,0,-8,-5), Qt::AlignBottom | Qt::AlignRight, timeStr);
+
+        painter->restore();
+    }
+
+    QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override {
+        QString text = index.data(Qt::UserRole + 1).toString();
+        QString sender = index.data(Qt::UserRole + 2).toString();
+        bool isMe = index.data(Qt::UserRole + 4).toBool();
+
+        QRect b, t, n;
+        int h;
+        getBubbleLayout(text, sender, isMe, option.rect.width(), b, t, n, h);
+        return QSize(option.rect.width(), h);
+    }
+};
+
+// ==========================================
+// 3. MAIN WINDOW IMPL
+// ==========================================
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), m_client(new WebSocketClient(this)), m_nam(new QNetworkAccessManager(this))
 {
-    // Load Settings FIRST
     QSettings settings("Noveo", "MessengerClient");
     m_isDarkMode = settings.value("darkMode", false).toBool();
 
     setupUi();
     applyTheme();
 
-    // Pre-fill inputs if saved
     if(settings.contains("username")) {
         m_usernameInput->setText(settings.value("username").toString());
         m_passwordInput->setText(settings.value("password").toString());
@@ -151,6 +299,8 @@ MainWindow::~MainWindow() {}
 
 void MainWindow::resizeEvent(QResizeEvent *event) {
     QMainWindow::resizeEvent(event);
+    // Force relayout of chat bubbles on resize
+    // m_chatList->scheduleDelayedItemsLayout(); 
 }
 
 void MainWindow::setupUi() {
@@ -170,15 +320,12 @@ void MainWindow::setupUi() {
 
     m_usernameInput = new QLineEdit();
     m_usernameInput->setPlaceholderText("Username");
-    
     m_passwordInput = new QLineEdit();
     m_passwordInput->setPlaceholderText("Password");
     m_passwordInput->setEchoMode(QLineEdit::Password);
-
     m_loginBtn = new QPushButton("Log In");
     m_loginBtn->setCursor(Qt::PointingHandCursor);
     m_loginBtn->setMinimumHeight(40);
-
     m_statusLabel = new QLabel("Waiting for connection...");
     m_statusLabel->setAlignment(Qt::AlignCenter);
 
@@ -190,7 +337,6 @@ void MainWindow::setupUi() {
     loginLayout->addWidget(m_statusLabel);
     loginLayout->addStretch();
     loginLayout->setContentsMargins(300, 50, 300, 50);
-
     m_stackedWidget->addWidget(m_loginPage);
 
     // --- App Page ---
@@ -204,29 +350,24 @@ void MainWindow::setupUi() {
     m_sidebarTabs->setFixedWidth(300);
     m_sidebarTabs->setTabPosition(QTabWidget::South);
 
-    // Chats List
     m_chatListWidget = new QListWidget();
     m_chatListWidget->setIconSize(QSize(42, 42));
-    m_chatListWidget->setItemDelegate(new UserListDelegate(this)); // Use Delegate
-    m_chatListWidget->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff); // Hide bottom scrollbar
+    m_chatListWidget->setItemDelegate(new UserListDelegate(this));
+    m_chatListWidget->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
-    // Contacts List
     m_contactListWidget = new QListWidget();
     m_contactListWidget->setIconSize(QSize(42, 42));
-    m_contactListWidget->setItemDelegate(new UserListDelegate(this)); // Use Delegate
-    m_contactListWidget->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff); // Hide bottom scrollbar
+    m_contactListWidget->setItemDelegate(new UserListDelegate(this));
+    m_contactListWidget->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
-    // Settings Tab
+    // Settings
     m_settingsTab = new QWidget();
     QVBoxLayout *settingsLayout = new QVBoxLayout(m_settingsTab);
-    
     QCheckBox *darkModeCheck = new QCheckBox("Dark Mode");
     darkModeCheck->setChecked(m_isDarkMode);
     connect(darkModeCheck, &QCheckBox::toggled, this, &MainWindow::onDarkModeToggled);
-
     QPushButton *logoutBtn = new QPushButton("Log Out");
     connect(logoutBtn, &QPushButton::clicked, this, &MainWindow::onLogoutClicked);
-
     settingsLayout->addWidget(new QLabel("Settings"));
     settingsLayout->addWidget(darkModeCheck);
     settingsLayout->addStretch();
@@ -248,50 +389,41 @@ void MainWindow::setupUi() {
     header->setObjectName("chatHeader");
     header->setFixedHeight(60);
     QHBoxLayout *headerLayout = new QHBoxLayout(header);
-    
     m_chatTitle = new QLabel("Select a chat");
     m_chatTitle->setStyleSheet("font-size: 16px; font-weight: bold; margin-left: 10px;");
     headerLayout->addWidget(m_chatTitle);
 
-    // Messages (Scroll Area)
-    m_messageScrollArea = new QScrollArea();
-    m_messageScrollArea->setWidgetResizable(true);
-    m_messageScrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff); // Hide bottom scrollbar
-    m_messageScrollArea->setObjectName("messageArea");
-
-    m_messageContainer = new QWidget();
-    m_messageContainer->setObjectName("messageContainer");
-    
-    m_messageLayout = new QVBoxLayout(m_messageContainer);
-    m_messageLayout->addStretch();
-
-    m_messageScrollArea->setWidget(m_messageContainer);
+    // --- REPLACED SCROLL AREA WITH QLISTWIDGET (For Virtualization) ---
+    m_chatList = new QListWidget();
+    m_chatList->setObjectName("chatList");
+    m_chatList->setFrameShape(QFrame::NoFrame);
+    m_chatList->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel); // Smooth scroll
+    m_chatList->setUniformItemSizes(false); // Variable bubble heights
+    m_chatList->setResizeMode(QListView::Adjust); // Recalculate bubbles on resize
+    m_chatList->setSelectionMode(QAbstractItemView::NoSelection); // No highlight on click
+    m_chatList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff); // Requested feature
+    m_chatList->setItemDelegate(new MessageDelegate(this));
 
     // Input Area
     QWidget *inputArea = new QWidget();
     inputArea->setObjectName("inputArea");
     inputArea->setFixedHeight(60);
     QHBoxLayout *inputLayout = new QHBoxLayout(inputArea);
-
     m_messageInput = new QLineEdit();
     m_messageInput->setPlaceholderText("Write a message...");
-    
     m_sendBtn = new QPushButton("Send");
     m_sendBtn->setCursor(Qt::PointingHandCursor);
-
     inputLayout->addWidget(m_messageInput);
     inputLayout->addWidget(m_sendBtn);
 
     chatAreaLayout->addWidget(header);
-    chatAreaLayout->addWidget(m_messageScrollArea);
+    chatAreaLayout->addWidget(m_chatList); // Add List instead of ScrollArea
     chatAreaLayout->addWidget(inputArea);
 
     appLayout->addWidget(m_sidebarTabs);
     appLayout->addWidget(m_chatAreaWidget);
-
     m_stackedWidget->addWidget(m_appPage);
 
-    // Signals
     connect(m_loginBtn, &QPushButton::clicked, this, &MainWindow::onLoginBtnClicked);
     connect(m_chatListWidget, &QListWidget::itemClicked, this, &MainWindow::onChatSelected);
     connect(m_contactListWidget, &QListWidget::itemClicked, this, &MainWindow::onContactSelected);
@@ -322,8 +454,7 @@ void MainWindow::applyTheme() {
         "QTabBar::tab:selected { border-bottom: 2px solid #0088cc; }"
         "#chatHeader { background-color: %2; border-bottom: 1px solid %4; }"
         "#inputArea { background-color: %2; border-top: 1px solid %4; }"
-        "#messageArea { background-color: %1; border: none; }"
-        "#messageContainer { background-color: transparent; }"
+        "#chatList { background-color: %1; border: none; }" // Styled List
     ).arg(bg, panelBg, text, border, inputBg, listHover);
 
     setStyleSheet(style);
@@ -334,7 +465,6 @@ void MainWindow::onDarkModeToggled(bool checked) {
     QSettings settings("Noveo", "MessengerClient");
     settings.setValue("darkMode", m_isDarkMode);
     applyTheme();
-
     if (!m_currentChatId.isEmpty()) {
         renderMessages(m_currentChatId);
     }
@@ -344,7 +474,6 @@ void MainWindow::onLogoutClicked() {
     QSettings settings("Noveo", "MessengerClient");
     settings.remove("username");
     settings.remove("password");
-    
     m_usernameInput->clear();
     m_passwordInput->clear();
     m_stackedWidget->setCurrentWidget(m_loginPage);
@@ -353,8 +482,6 @@ void MainWindow::onLogoutClicked() {
 void MainWindow::onConnected() {
     m_statusLabel->setText("Connected.");
     m_loginBtn->setEnabled(true);
-
-    // AUTO LOGIN
     QSettings settings("Noveo", "MessengerClient");
     if(settings.contains("username") && settings.contains("password")) {
         m_statusLabel->setText("Auto-logging in...");
@@ -365,9 +492,7 @@ void MainWindow::onConnected() {
 void MainWindow::onLoginBtnClicked() {
     QString user = m_usernameInput->text().trimmed();
     QString pass = m_passwordInput->text();
-
     if (user.isEmpty() || pass.isEmpty()) return;
-
     m_statusLabel->setText("Logging in...");
     m_client->login(user, pass);
 }
@@ -386,17 +511,14 @@ void MainWindow::onAuthFailed(const QString &msg) {
 void MainWindow::onUserListUpdated(const std::vector<User> &users) {
     m_users.clear();
     m_contactListWidget->clear();
-
     for(const auto &u : users) {
         m_users.insert(u.userId, u);
         if(u.userId == m_client->currentUserId()) continue;
-
         QListWidgetItem *item = new QListWidgetItem(m_contactListWidget);
         item->setText(u.username);
         item->setData(Qt::UserRole, u.userId);
         item->setIcon(getAvatar(u.username, u.avatarUrl));
     }
-
     // Refresh chat names
     for(int i=0; i<m_chatListWidget->count(); i++) {
         QListWidgetItem *item = m_chatListWidget->item(i);
@@ -412,14 +534,12 @@ void MainWindow::onUserListUpdated(const std::vector<User> &users) {
 void MainWindow::onChatHistoryReceived(const std::vector<Chat> &chats) {
     m_chats.clear();
     m_chatListWidget->clear();
-
     std::vector<Chat> sortedChats = chats;
     std::sort(sortedChats.begin(), sortedChats.end(), [](const Chat &a, const Chat &b) {
         qint64 timeA = a.messages.empty() ? 0 : a.messages.back().timestamp;
         qint64 timeB = b.messages.empty() ? 0 : b.messages.back().timestamp;
         return timeA > timeB;
     });
-
     for (const auto &chat : sortedChats) {
         m_chats.insert(chat.chatId, chat);
         QListWidgetItem *item = new QListWidgetItem(m_chatListWidget);
@@ -445,13 +565,10 @@ void MainWindow::onNewChatCreated(const Chat &chat) {
 
 QString MainWindow::resolveChatName(const Chat &chat) {
     if (!chat.chatName.isEmpty()) return chat.chatName;
-
     if (chat.chatType == "private") {
         for (const auto &memberId : chat.members) {
             if (memberId != m_client->currentUserId()) {
-                if (m_users.contains(memberId)) {
-                    return m_users[memberId].username;
-                }
+                if (m_users.contains(memberId)) return m_users[memberId].username;
             }
         }
         return "Unknown User";
@@ -463,7 +580,6 @@ QColor MainWindow::getColorForName(const QString &name) {
     unsigned int hash = 0;
     QByteArray bytes = name.toUtf8();
     for (char c : bytes) hash = c + (hash << 6) + (hash << 16) - hash;
-
     static const QList<QColor> colors = {
         QColor("#e57373"), QColor("#f06292"), QColor("#ba68c8"), QColor("#9575cd"),
         QColor("#7986cb"), QColor("#64b5f6"), QColor("#4fc3f7"), QColor("#4dd0e1"),
@@ -474,51 +590,42 @@ QColor MainWindow::getColorForName(const QString &name) {
 }
 
 QIcon MainWindow::getAvatar(const QString &name, const QString &url) {
-    Q_UNUSED(url); // Simple generated avatar for now
+    Q_UNUSED(url);
     QPixmap pixmap(42, 42);
     pixmap.fill(Qt::transparent);
-
     QPainter painter(&pixmap);
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setBrush(getColorForName(name));
     painter.setPen(Qt::NoPen);
     painter.drawEllipse(0, 0, 42, 42);
-
     painter.setPen(Qt::white);
     QFont font = painter.font();
     font.setPixelSize(20);
     font.setBold(true);
     painter.setFont(font);
-
     QString letter = name.isEmpty() ? "?" : name.left(1).toUpper();
     painter.drawText(QRect(0, 0, 42, 42), Qt::AlignCenter, letter);
-
     return QIcon(pixmap);
 }
 
-bool MainWindow::isScrolledToBottom() const {
-    QScrollBar *sb = m_messageScrollArea->verticalScrollBar();
-    return sb->value() >= (sb->maximum() - 20);
-}
-
 void MainWindow::scrollToBottom() {
-    QTimer::singleShot(10, this, [this]() {
-        QScrollBar *sb = m_messageScrollArea->verticalScrollBar();
-        sb->setValue(sb->maximum());
-    });
+    if (m_chatList->count() > 0)
+        m_chatList->scrollToBottom();
 }
 
 void MainWindow::smoothScrollToBottom() {
-    QTimer::singleShot(10, this, [this]() {
-        QScrollBar *sb = m_messageScrollArea->verticalScrollBar();
-        sb->setValue(sb->maximum());
-    });
+    if (m_chatList->count() > 0)
+        m_chatList->scrollToBottom();
+}
+
+bool MainWindow::isScrolledToBottom() const {
+    QScrollBar *sb = m_chatList->verticalScrollBar();
+    return sb->value() >= (sb->maximum() - 50);
 }
 
 void MainWindow::onChatSelected(QListWidgetItem *item) {
     QString chatId = item->data(Qt::UserRole).toString();
     m_currentChatId = chatId;
-
     if (m_chats.contains(chatId)) {
         Chat chat = m_chats[chatId];
         m_chatTitle->setText(resolveChatName(chat));
@@ -529,7 +636,6 @@ void MainWindow::onChatSelected(QListWidgetItem *item) {
 void MainWindow::onContactSelected(QListWidgetItem *item) {
     QString userId = item->data(Qt::UserRole).toString();
     QString selfId = m_client->currentUserId();
-
     QStringList ids = {userId, selfId};
     ids.sort();
     QString potentialChatId = ids.join("_");
@@ -541,91 +647,44 @@ void MainWindow::onContactSelected(QListWidgetItem *item) {
     } else {
         m_currentChatId = potentialChatId;
         m_chatTitle->setText(item->text());
-
-        // Clear view
-        QLayoutItem *child;
-        while ((child = m_messageLayout->takeAt(0)) != nullptr) {
-            if(child->widget()) delete child->widget();
-            delete child;
-        }
-        m_messageLayout->addStretch();
+        m_chatList->clear();
     }
 }
 
 void MainWindow::renderMessages(const QString &chatId) {
-    // Clear current messages
-    QLayoutItem *child;
-    while ((child = m_messageLayout->takeAt(0)) != nullptr) {
-        if(child->widget()) delete child->widget();
-        delete child;
-    }
+    m_chatList->clear();
 
     if (m_chats.contains(chatId)) {
         const auto &msgs = m_chats[chatId].messages;
-
-        // --- OPTIMIZATION START ---
-        // Only load the last 50 messages to prevent lag and off-screen rendering
-        int start = 0;
-        int limit = 50;
-        if (msgs.size() > limit) {
-            start = msgs.size() - limit;
-            
-            // Optional: Placeholder for "Load More" functionality
-            QLabel *historyLabel = new QLabel("Earlier messages hidden");
-            historyLabel->setStyleSheet("color: gray; font-size: 10px; padding: 10px;");
-            historyLabel->setAlignment(Qt::AlignCenter);
-            m_messageLayout->addWidget(historyLabel);
-        }
-        // --- OPTIMIZATION END ---
-
-        int count = 0;
-        for (int i = start; i < msgs.size(); ++i) {
-            addMessageBubble(msgs[i], false, false);
-            
-            // Keep UI responsive
-            count++;
-            if (count % 20 == 0) QApplication::processEvents();
+        
+        // With QListWidget + Delegate, we can render thousands of items smoothly.
+        // No need to limit to 50 anymore. The viewport handles it.
+        for (const auto &msg : msgs) {
+            addMessageBubble(msg, false, false);
         }
     }
-
-    m_messageLayout->addStretch();
-    m_messageContainer->adjustSize();
-    QApplication::processEvents();
     scrollToBottom();
 }
 
 void MainWindow::addMessageBubble(const Message &msg, bool appendStretch, bool animate) {
-    if (appendStretch && m_messageLayout->count() > 0) {
-        QLayoutItem *item = m_messageLayout->takeAt(m_messageLayout->count() - 1);
-        delete item;
-    }
+    Q_UNUSED(appendStretch); // Not needed for QListWidget
+    Q_UNUSED(animate);       // Animations in ListWidget are harder, skipping for performance
 
     bool isMe = (msg.senderId == m_client->currentUserId());
     QString senderName = m_users.contains(msg.senderId) ? m_users[msg.senderId].username : "Unknown";
 
-    MessageBubble *bubble = new MessageBubble(msg.text, senderName, msg.timestamp, isMe);
-    m_messageLayout->addWidget(bubble);
-
-    if (animate) {
-        QGraphicsOpacityEffect *eff = new QGraphicsOpacityEffect(bubble);
-        bubble->setGraphicsEffect(eff);
-        QPropertyAnimation *a = new QPropertyAnimation(eff, "opacity");
-        a->setDuration(300);
-        a->setStartValue(0);
-        a->setEndValue(1);
-        a->start(QAbstractAnimation::DeleteWhenStopped);
-    }
-
-    if (appendStretch) {
-        m_messageLayout->addStretch();
-    }
+    QListWidgetItem *item = new QListWidgetItem(m_chatList);
+    item->setData(Qt::UserRole + 1, msg.text);
+    item->setData(Qt::UserRole + 2, senderName);
+    item->setData(Qt::UserRole + 3, msg.timestamp);
+    item->setData(Qt::UserRole + 4, isMe);
+    
+    // Size hint is calculated by Delegate
 }
 
 void MainWindow::onMessageReceived(const Message &msg) {
     if (m_chats.contains(msg.chatId)) {
         m_chats[msg.chatId].messages.push_back(msg);
-
-        // Move chat to top of list
         for(int i=0; i<m_chatListWidget->count(); i++) {
             if (m_chatListWidget->item(i)->data(Qt::UserRole).toString() == msg.chatId) {
                 QListWidgetItem *item = m_chatListWidget->takeItem(i);
@@ -637,12 +696,8 @@ void MainWindow::onMessageReceived(const Message &msg) {
 
     if (m_currentChatId == msg.chatId) {
         bool wasAtBottom = isScrolledToBottom();
-        bool isMyMessage = (msg.senderId == m_client->currentUserId());
-        
-        addMessageBubble(msg, true, true);
-        
-        if (wasAtBottom || isMyMessage) {
-            QApplication::processEvents();
+        addMessageBubble(msg, false, false);
+        if (wasAtBottom || msg.senderId == m_client->currentUserId()) {
             smoothScrollToBottom();
         }
     }
@@ -651,7 +706,6 @@ void MainWindow::onMessageReceived(const Message &msg) {
 void MainWindow::onSendBtnClicked() {
     QString text = m_messageInput->text().trimmed();
     if (text.isEmpty() || m_currentChatId.isEmpty()) return;
-
     m_client->sendMessage(m_currentChatId, text);
     m_messageInput->clear();
 }
