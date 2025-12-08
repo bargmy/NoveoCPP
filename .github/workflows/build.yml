@@ -54,8 +54,9 @@ jobs:
               echo "Latest tag: $latest -> ${MAJOR}.${MINOR}.${PATCH}.${BUILD}"
 
               # Detect code changes since last tag, ignoring non-code files
-              # (CMakeLists.txt, version.rc, README.md, icon.png, icon.ico)
-              changed_files=$(git diff --name-only "$latest"..HEAD | grep -vE '^(CMakeLists\.txt|version\.rc|README\.md|icon\.png|icon\.ico)$' || true)
+              # (CMakeLists.txt, version.rc, README.md, icon.png, icon.ico, workflows)
+              changed_files=$(git diff --name-only "$latest"..HEAD | \
+                grep -vE '^(CMakeLists\.txt|version\.rc|README\.md|icon\.png|icon\.ico|\.github/workflows/.*)$' || true)
 
               if [ -n "$changed_files" ]; then
                 echo "Code changes detected (excluding ignored files):"
@@ -67,7 +68,7 @@ jobs:
               fi
 
               if [ "$CODE_CHANGED" -eq 1 ]; then
-                # Bump PATCH, reset BUILD to 0 (e.g. 1.2.0.3 -> 1.2.1.0)
+                # Code changed: bump PATCH, reset BUILD to 0 (e.g. 1.2.0.3 -> 1.2.1.0)
                 PATCH=$((PATCH + 1))
                 BUILD=0
 
