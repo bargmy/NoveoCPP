@@ -2,14 +2,21 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
-#include <QListWidget>
-#include <QLineEdit>
-#include <QPushButton>
-#include <QLabel>
-#include <QStackedWidget>
-#include <QMap>
+#include <QListWidgetItem>
 #include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QTimer>
+#include <QMap>
 #include "WebSocketClient.h"
+
+// Forward declarations
+class QListWidget;
+class QLineEdit;
+class QLabel;
+class QPushButton;
+class QStackedWidget;
+class QTabWidget;
+class QCheckBox;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -35,6 +42,14 @@ private slots:
     void onSendBtnClicked();
     void onLogoutClicked();
     void onDarkModeToggled(bool checked);
+    
+    // New Slots
+    void onUserTyping(const QString &chatId, const QString &username);
+    void onUserPresenceChanged(const QString &userId, bool online);
+    void onMessageDeleted(const QString &chatId, const QString &messageId);
+    void onInputTextChanged(const QString &text);
+    void onMessageContextMenu(const QPoint &pos);
+    void onAvatarDownloaded(QNetworkReply *reply);
 
 private:
     WebSocketClient *m_client;
@@ -42,8 +57,15 @@ private:
     
     QMap<QString, Chat> m_chats;
     QMap<QString, User> m_users;
+    QMap<QString, QIcon> m_avatarCache; // Cache for loaded PFPs
+
     QString m_currentChatId;
     bool m_isDarkMode = false;
+    
+    // Typing Logic
+    QTimer *m_typingTimer;
+    QTimer *m_typingClearTimer; // Clears "User is typing..." label
+    QString m_replyToId; // Store ID if replying
 
     // UI Elements
     QStackedWidget *m_stackedWidget;
@@ -55,32 +77,32 @@ private:
 
     QWidget *m_appPage;
     QTabWidget *m_sidebarTabs;
-    QListWidget *m_chatListWidget;
-    QListWidget *m_contactListWidget;
+    QListWidget *m_chatListWidget; // Left sidebar chats
+    QListWidget *m_contactListWidget; // Left sidebar contacts
     QWidget *m_settingsTab;
-
+    
     QWidget *m_chatAreaWidget;
     QLabel *m_chatTitle;
+    QLabel *m_typingLabel; // Shows "X is typing..."
+    QListWidget *m_chatList; // The messages area
     
-    // --- CHANGED: ScrollArea -> ListWidget ---
-    QListWidget *m_chatList; 
-    
+    QWidget *m_replyContainer; // Shows "Replying to..."
+    QLabel *m_replyLabel;
+    QPushButton *m_cancelReplyBtn;
+
     QLineEdit *m_messageInput;
     QPushButton *m_sendBtn;
 
     void setupUi();
     void applyTheme();
     void renderMessages(const QString &chatId);
-    
-    // Modified signature (removed stretch/animate as they don't apply to ListItems easily)
-    void addMessageBubble(const Message &msg, bool appendStretch = false, bool animate = false);
-    
+    void addMessageBubble(const Message &msg);
     QString resolveChatName(const Chat &chat);
-    QIcon getAvatar(const QString &name, const QString &url);
-    QColor getColorForName(const QString &name);
     
-    bool isScrolledToBottom() const;
-    void scrollToBottom();
+    // PFP Helper
+    void loadAvatar(const QString &url, const QString &targetId, bool isChat);
+    QIcon getAvatar(const QString &id);
+
     void smoothScrollToBottom();
 };
 

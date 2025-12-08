@@ -13,10 +13,13 @@ class WebSocketClient : public QObject
     Q_OBJECT
 public:
     explicit WebSocketClient(QObject *parent = nullptr);
+
     void connectToServer();
     void login(const QString &username, const QString &password);
     void sendMessage(const QString &chatId, const QString &text, const QString &replyToId = QString());
-    
+    void sendTyping(const QString &chatId);
+    void deleteMessage(const QString &chatId, const QString &messageId);
+
     bool isConnected() const;
     QString currentUserId() const { return m_currentUser.userId; }
 
@@ -30,6 +33,11 @@ signals:
     void userListUpdated(const std::vector<User> &users);
     void errorOccurred(const QString &msg);
     void newChatCreated(const Chat &chat);
+    
+    // New Signals
+    void userTyping(const QString &chatId, const QString &username);
+    void userPresenceChanged(const QString &userId, bool online);
+    void messageDeleted(const QString &chatId, const QString &messageId);
 
 private slots:
     void onConnected();
@@ -40,7 +48,7 @@ private:
     QWebSocket m_webSocket;
     User m_currentUser;
     QString m_token;
-    
+
     void handleLoginSuccess(const QJsonObject &data);
     void handleChatHistory(const QJsonObject &data);
     void handleMessage(const QJsonObject &data);
