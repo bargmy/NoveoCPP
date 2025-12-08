@@ -110,44 +110,82 @@ public:
 };
 
 // ==========================================
-// 2. MESSAGE DELEGATE (Chat Area) - The Fix for Lag
+// 2. MESSAGE DELEGATE (Chat Area)
 // ==========================================
 class MessageDelegate : public QStyledItemDelegate {
 public:
     using QStyledItemDelegate::QStyledItemDelegate;
 
     // Helper to calculate bubble geometry
-    void getBubbleLayout(const QString &text, const QString &sender, bool isMe, int viewWidth, 
-                         QRect &bubbleRect, QRect &textRect, QRect &nameRect, int &neededHeight) const {
-        
-        int maxBubbleWidth = viewWidth * 0.70; // Max 70% of screen width
-        int padding = 10;
-        int nameHeight = isMe ? 0 : 15; // Space for name if not me
+    void getBubbleLayout(const QString &text, const QString &sender, bool isMe, int viewWidth,
+                         QRect &bubbleRect, QRect &textRect, QRect &nameRect, QRect &avatarRect, int &neededHeight) const {
+        int maxBubbleWidth = viewWidth * 0.75; // Increased max width slightly
+        int nameHeight = isMe ? 0 : 18; 
         int timeHeight = 12;
-        int bubblePadding = 16; // 8px top + 8px bottom
+        int bubblePadding = 16; 
+        int avatarSize = 38; // Size of the PFP
+        int avatarGap = 10;
+        int sideMargin = 10;
 
-        // Calculate Text Height using QTextDocument (handles wrapping)
-        QTextDocument doc;
-        doc.setDefaultFont(QFont("Segoe UI", 10)); // Adjust font size here
-        doc.setPlainText(text);
-        doc.setTextWidth(maxBubbleWidth - 20); // Inner padding
+        // 1. Calculate Name Width (Fix for Nametag sticking out)
+        static QRegularExpression regex(R"(^(.*)\s\[#([a-fA-F0-9]{6}),\s*"(.*)"\]$)");
+        QRegularExpressionMatch match = regex.match(sender);
+        QString displayName = sender;
+        QString tagText;
+        bool hasTag = false;
+        if (match.hasMatch()) {
+            displayName = match.captured(1).trimmed();
+            tagText = match.captured(3);
+            hasTag = true;
+        }
+
+        // Measure Name
+        QFont nameFont("Segoe UI", 11);
+        nameFont.setBold(true);
+        QFontMetrics fm(nameFont);
+        int nameTextW = fm.horizontalAdvance(displayName);
         
+        // Measure Tag
+        int tagW = 0;
+        if (hasTag) {
+            QFont tagFont("Segoe UI", 9);
+            tagFont.setBold(true);
+            QFontMetrics tagFm(tagFont);
+            tagW = tagFm.horizontalAdvance(tagText) + 12; // +padding inside tag
+        }
+        int totalNameWidth = nameTextW + (hasTag ? (tagW + 8) : 0);
+
+        // 2. Calculate Text Height
+        QTextDocument doc;
+        doc.setDefaultFont(QFont("Segoe UI", 10));
+        doc.setPlainText(text);
+        doc.setTextWidth(maxBubbleWidth - 20); 
         int textWidth = doc.idealWidth();
         int textHeight = doc.size().height();
 
-        // Calculate total bubble dimensions
-        int bubbleW = qMax(textWidth + 20, 100); // Min width
+        // 3. Determine Bubble Dimensions
+        // Width is max of text width OR name width (plus padding)
+        int bubbleW = qMax(textWidth + 20, qMax(totalNameWidth + 30, 100));
         int bubbleH = textHeight + nameHeight + timeHeight + bubblePadding;
-
         neededHeight = bubbleH + 10; // +10 for external margin
 
-        // Position
-        int x = isMe ? (viewWidth - bubbleW - 20) : 10; // Right or Left aligned
+        // 4. Position
+        int x;
+        if (isMe) {
+            x = viewWidth - bubbleW - sideMargin;
+            avatarRect = QRect(); // No avatar for self
+        } else {
+            // Shift bubble right to make room for avatar
+            x = sideMargin + avatarSize + avatarGap;
+            // Avatar aligned to the bottom of the message
+            avatarRect = QRect(sideMargin, 5 + bubbleH - avatarSize, avatarSize, avatarSize);
+        }
+
         bubbleRect = QRect(x, 5, bubbleW, bubbleH);
-        
+
         if (!isMe) {
             nameRect = QRect(x + 10, 5 + 5, bubbleW - 20, 15);
-            textRect = QRect(x + 10, 5 + 20, bubbleW - 20, textHeight);
+            textRect = QRect(x + 10, 5 + 23, bubbleW - 20, textHeight);
         } else {
             textRect = QRect(x + 10, 5 + 8, bubbleW - 20, textHeight);
         }
@@ -162,28 +200,33 @@ public:
         QString sender = index.data(Qt::UserRole + 2).toString();
         qint64 timestamp = index.data(Qt::UserRole + 3).toLongLong();
         bool isMe = index.data(Qt::UserRole + 4).toBool();
+        QIcon avatar = qvariant_cast<QIcon>(index.data(Qt::DecorationRole)); // Retrieve Avatar
 
-        QRect bubbleRect, textRect, nameRect;
+        QRect bubbleRect, textRect, nameRect, avatarRect;
         int neededHeight;
-        getBubbleLayout(text, sender, isMe, option.rect.width(), bubbleRect, textRect, nameRect, neededHeight);
+        getBubbleLayout(text, sender, isMe, option.rect.width(), bubbleRect, textRect, nameRect, avatarRect, neededHeight);
 
-        // Adjust rect to current item position
+        // Adjust rects to current item position
         bubbleRect.translate(0, option.rect.top());
         textRect.translate(0, option.rect.top());
         nameRect.translate(0, option.rect.top());
+        avatarRect.translate(0, option.rect.top());
+
+        // Draw Avatar (if not me)
+        if (!isMe && !avatar.isNull()) {
+            avatar.paint(painter, avatarRect);
+        }
 
         // Draw Bubble Background
         QColor bubbleColor = isMe ? QColor("#EEFFDE") : Qt::white;
         painter->setBrush(bubbleColor);
         painter->setPen(QPen(QColor("#d0d0d0"), 1));
-        painter->drawRoundedRect(bubbleRect, 10, 10);
+        painter->drawRoundedRect(bubbleRect, 12, 12);
 
         // Draw Name (if not me)
         if (!isMe) {
-            // Regex for Nametag in Chat
-            static QRegularExpression regex("^(.*)\\s\\[#([a-fA-F0-9]{6}),\\s*\"(.*)\"\\]$");
+            static QRegularExpression regex(R"(^(.*)\s\[#([a-fA-F0-9]{6}),\s*"(.*)"\]$)");
             QRegularExpressionMatch match = regex.match(sender);
-            
             QString displayName = sender;
             QString tagText;
             QColor tagColor;
@@ -202,15 +245,14 @@ public:
             nameFont.setPixelSize(11);
             nameFont.setBold(true);
             painter->setFont(nameFont);
-            
             QFontMetrics fm(nameFont);
             int nameW = fm.horizontalAdvance(displayName);
             painter->drawText(nameRect.left(), nameRect.top() + fm.ascent(), displayName);
 
             // Draw Tag
             if (hasTag) {
-                int tagX = nameRect.left() + nameW + 5;
-                int tagY = nameRect.top(); // Align top
+                int tagX = nameRect.left() + nameW + 6;
+                int tagY = nameRect.top(); 
                 int tagW = fm.horizontalAdvance(tagText) + 10;
                 int tagH = 14;
 
@@ -229,11 +271,10 @@ public:
         // Draw Message Text
         painter->setPen(Qt::black);
         QTextDocument doc;
-        QFont textFont("Segoe UI", 10); // Standard font size
+        QFont textFont("Segoe UI", 10);
         doc.setDefaultFont(textFont);
         doc.setPlainText(text);
         doc.setTextWidth(textRect.width());
-        
         painter->translate(textRect.topLeft());
         doc.drawContents(painter);
         painter->translate(-textRect.topLeft());
@@ -242,13 +283,10 @@ public:
         QDateTime dt;
         dt.setSecsSinceEpoch(timestamp);
         QString timeStr = dt.toString("hh:mm AP");
-        
         painter->setPen(QColor("#888888"));
         QFont timeFont = option.font;
         timeFont.setPixelSize(9);
         painter->setFont(timeFont);
-        
-        // Bottom right of bubble
         painter->drawText(bubbleRect.adjusted(0,0,-8,-5), Qt::AlignBottom | Qt::AlignRight, timeStr);
 
         painter->restore();
@@ -258,10 +296,10 @@ public:
         QString text = index.data(Qt::UserRole + 1).toString();
         QString sender = index.data(Qt::UserRole + 2).toString();
         bool isMe = index.data(Qt::UserRole + 4).toBool();
-
-        QRect b, t, n;
+        
+        QRect b, t, n, a;
         int h;
-        getBubbleLayout(text, sender, isMe, option.rect.width(), b, t, n, h);
+        getBubbleLayout(text, sender, isMe, option.rect.width(), b, t, n, a, h);
         return QSize(option.rect.width(), h);
     }
 };
@@ -668,11 +706,18 @@ void MainWindow::renderMessages(const QString &chatId) {
 }
 
 void MainWindow::addMessageBubble(const Message &msg, bool appendStretch, bool animate) {
-    Q_UNUSED(appendStretch); // Not needed for QListWidget
-    Q_UNUSED(animate);       // Animations in ListWidget are harder, skipping for performance
+    Q_UNUSED(appendStretch);
+    Q_UNUSED(animate);
 
     bool isMe = (msg.senderId == m_client->currentUserId());
-    QString senderName = m_users.contains(msg.senderId) ? m_users[msg.senderId].username : "Unknown";
+    
+    // Retrieve Sender Name and Avatar URL
+    QString senderName = "Unknown";
+    QString avatarUrl = "";
+    if (m_users.contains(msg.senderId)) {
+        senderName = m_users[msg.senderId].username;
+        avatarUrl = m_users[msg.senderId].avatarUrl;
+    }
 
     QListWidgetItem *item = new QListWidgetItem(m_chatList);
     item->setData(Qt::UserRole + 1, msg.text);
@@ -680,7 +725,11 @@ void MainWindow::addMessageBubble(const Message &msg, bool appendStretch, bool a
     item->setData(Qt::UserRole + 3, msg.timestamp);
     item->setData(Qt::UserRole + 4, isMe);
     
-    // Size hint is calculated by Delegate
+    // Set Avatar Icon (Qt::DecorationRole)
+    // Only set it if it's not me (Telegram style)
+    if (!isMe) {
+        item->setIcon(getAvatar(senderName, avatarUrl));
+    }
 }
 
 void MainWindow::onMessageReceived(const Message &msg) {
