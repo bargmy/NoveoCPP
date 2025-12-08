@@ -197,3 +197,9 @@ void WebSocketClient::handleNewChat(const QJsonObject &data) {
 
     emit newChatCreated(chat);
 }
+
+void WebSocketClient::logout() {
+    m_currentUser = User();
+    m_token.clear();
+    m_webSocket.close();
+}
