@@ -131,29 +131,19 @@ jobs:
           mkdir -p build
           cd build
           cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
-          cmake --build . --config Release
+          cmake --build . 
 
-          # 3. FORCE COPY DLLs (Fixes "Qt5Network.dll not found")
-          echo "Forcing copy of core Qt DLLs..."
-          cp "$QT_ROOT/bin/Qt5Core.dll" .
-          cp "$QT_ROOT/bin/Qt5Gui.dll" .
-          cp "$QT_ROOT/bin/Qt5Widgets.dll" .
-          cp "$QT_ROOT/bin/Qt5Network.dll" .
-          cp "$QT_ROOT/bin/Qt5WebSockets.dll" .
+          # 3. DEPLOY: windeployqt
+          # --compiler-runtime: Automatically copies libgcc_s_seh-1.dll, libstdc++-6.dll, etc.
+          # --dir .: Copies DLLs directly next to the .exe
+          echo "Running windeployqt..."
+          "$QT_ROOT/bin/windeployqt.exe" --release --no-translations --compiler-runtime --no-opengl-sw --dir . ./NoveoDesktop.exe
 
-          # 4. Run windeployqt (handles plugins/platforms)
-          "$QT_ROOT/bin/windeployqt.exe" --release --no-translations --no-compiler-runtime --no-opengl-sw --dir . ./NoveoDesktop.exe || true
-
-          # 5. Download OpenSSL
+          # 4. Download OpenSSL
           curl -L -o libssl-1_1-x64.dll http://hienob.bargmy.ir/openssl/libssl-1_1-x64.dll
           curl -L -o libcrypto-1_1-x64.dll http://hienob.bargmy.ir/openssl/libcrypto-1_1-x64.dll
           
-          # 6. MinGW Runtimes
-          cp "$MINGW_BIN/libgcc_s_seh-1.dll" . || true
-          cp "$MINGW_BIN/libstdc++-6.dll" . || true
-          cp "$MINGW_BIN/libwinpthread-1.dll" . || true
-
-          # 7. Zip
+          # 5. Zip
           ZIP_NAME="NoveoDesktop_${VERSION}_${DATE}_x64_Windows.zip"
           7z a "$ZIP_NAME" * -xr!*.obj -xr!*.cpp -xr!*.h -xr!Makefile -xr!CMakeFiles -xr!*_autogen
 
@@ -168,7 +158,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # =========================================================
-  # LINUX BUILD (Fixed install error)
+  # LINUX BUILD (Fixed install error & Icon)
   # =========================================================
   build-linux:
     needs: prepare
@@ -206,9 +196,9 @@ jobs:
           cd build
           
           cmake .. -DCMAKE_BUILD_TYPE=Release
-          cmake --build . --config Release
+          cmake --build . 
           
-          # Fix "No rule to make target install" -> Manually copy
+          # Manually create AppDir structure
           mkdir -p AppDir/usr/bin
           mkdir -p AppDir/usr/share/applications
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps/
@@ -225,16 +215,23 @@ jobs:
           Categories=Utility;
           EOF
           
+          # CRITICAL FIX: Ensure icon.png exists and is copied
           if [ -f "../icon.png" ]; then
             cp "../icon.png" AppDir/usr/share/icons/hicolor/256x256/apps/NoveoDesktop.png
+          else
+             # Create a dummy icon if missing to prevent build failure, 
+             # OR fail explicitly if strict. Here we fail to warn you.
+             echo "ERROR: icon.png not found in repo root. linuxdeployqt requires it."
+             exit 1
           fi
 
           # LinuxDeployQt
           wget -c -nv https://github.com/probonopd/linuxdeployqt/releases/download/continuous/linuxdeployqt-continuous-x86_64.AppImage
           chmod +x linuxdeployqt-continuous-x86_64.AppImage
 
+          # Added -verbose=2 for debugging if it fails again
           ./linuxdeployqt-continuous-x86_64.AppImage AppDir/usr/share/applications/NoveoDesktop.desktop \
-             -appimage -unsupported-allow-new-glibc -no-translations
+             -appimage -unsupported-allow-new-glibc -no-translations -verbose=2
 
           APPIMAGE=$(ls *.AppImage | head -n 1)
           NEW_NAME="NoveoDesktop_${VERSION}_${DATE}_x64_Ubuntu.AppImage"
@@ -251,7 +248,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # =========================================================
-  # MACOS BUILD (Fixed .app error)
+  # MACOS BUILD (Fixed CMake Config Error)
   # =========================================================
   build-macos:
     needs: prepare
@@ -288,4 +285,61 @@ jobs:
                    -DCMAKE_PREFIX_PATH="${Qt5_Dir}" \
                    -DCMAKE_OSX_ARCHITECTURES=x86_64
 
-          cmake --build . --config
+          # CRITICAL FIX: Removed "--config Release"
+          # Single-configuration generators (like Makefiles) do not support --config
+          cmake --build . 
+
+          # Fix ".app not found" -> Manually create structure
+          APP_NAME="NoveoDesktop.app"
+          mkdir -p "$APP_NAME/Contents/MacOS"
+          mkdir -p "$APP_NAME/Contents/Resources"
+          
+          cp NoveoDesktop "$APP_NAME/Contents/MacOS/"
+          
+          # Optional: Copy icon if exists
+          if [ -f "../icon.icns" ]; then
+             cp "../icon.icns" "$APP_NAME/Contents/Resources/"
+          fi
+          
+          cat > "$APP_NAME/Contents/Info.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>NoveoDesktop</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.hienob.noveodesktop</string>
+              <key>CFBundleName</key>
+              <string>NoveoDesktop</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleIconFile</key>
+              <string>icon.icns</string>
+          </dict>
+          </plist>
+          EOF
+
+          # Bundle libs
+          macdeployqt "$APP_NAME" -dmg -verbose=1
+
+          DMG_FILE=$(ls *.dmg 2>/dev/null | head -n 1 || true)
+          if [ -n "$DMG_FILE" ]; then
+             NEW_DMG="NoveoDesktop_${VERSION}_${DATE}_x64_MacOS.dmg"
+             mv "$DMG_FILE" "$NEW_DMG"
+             FINAL_ASSET="$NEW_DMG"
+          else
+             ZIP_NAME="NoveoDesktop_${VERSION}_${DATE}_x64_MacOS.zip"
+             zip -r "$ZIP_NAME" "$APP_NAME"
+             FINAL_ASSET="$ZIP_NAME"
+          fi
+
+          echo "MAC_ASSET=build/$FINAL_ASSET" >> $GITHUB_ENV
+
+      - name: Upload MacOS Asset
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.prepare.outputs.new_version }}
+          files: ${{ env.MAC_ASSET }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
