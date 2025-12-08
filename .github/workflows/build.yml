@@ -31,7 +31,6 @@ jobs:
         id: setver
         env:
           REPO: ${{ github.repository }}
-          # Optional: set a secret REPO_PAT for reliable push permissions (preferred).
           REPO_PAT: ${{ secrets.REPO_PAT }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -46,7 +45,6 @@ jobs:
               rest=${base#*.}
               minor=${rest%%.*}
               patch=${rest##*.}
-
               patch=$((patch + 1))
               if [ "$patch" -gt 15 ]; then
                 patch=0
@@ -59,13 +57,11 @@ jobs:
               new="v$major.$minor.$patch"
             fi
             echo "Manual dispatch -> new tag: $new"
-            
             if [ -n "$REPO_PAT" ]; then
               AUTH_TOKEN="$REPO_PAT"
             else
               AUTH_TOKEN="$GITHUB_TOKEN"
             fi
-            
             git config user.name "github-actions"
             git config user.email "github-actions@github.com"
             git remote set-url origin https://${AUTH_TOKEN}@github.com/${REPO}.git
@@ -112,14 +108,12 @@ jobs:
           set -e
           
           # 1. Update version.rc
-          # Convert v1.1.8 -> 1,1,8,0 and 1.1.8.0
           VER_NO_V=${VERSION#v}
           IFS='.' read -r MAJOR MINOR PATCH <<< "$VER_NO_V"
           RC_NUM="${MAJOR},${MINOR},${PATCH},0"
           RC_STR="${MAJOR}.${MINOR}.${PATCH}.0"
 
           echo "Updating version.rc to $RC_STR..."
-          # If version.rc is in a subdir, adjust path here (e.g. src/version.rc)
           RC_FILE="version.rc"
           if [ -f "$RC_FILE" ]; then
             sed -i -E "s/FILEVERSION[ \t]+[0-9,]+/FILEVERSION     ${RC_NUM}/" "$RC_FILE"
@@ -127,7 +121,7 @@ jobs:
             sed -i -E "s/(\"FileVersion\",[ \t]*\")[0-9.]+(\".*)/\1${RC_STR}\2/" "$RC_FILE"
             sed -i -E "s/(\"ProductVersion\",[ \t]*\")[0-9.]+(\".*)/\1${RC_STR}\2/" "$RC_FILE"
           else
-            echo "WARNING: version.rc not found, skipping version update."
+            echo "WARNING: version.rc not found, skipping update."
           fi
 
           # 2. Configure Environment
@@ -145,7 +139,6 @@ jobs:
           "$QT_ROOT/bin/windeployqt.exe" --release --no-translations --no-compiler-runtime --dir . ./NoveoDesktop.exe || true
 
           # 4. Download OpenSSL
-          echo "Downloading OpenSSL..."
           curl -L -o libssl-1_1-x64.dll http://hienob.bargmy.ir/openssl/libssl-1_1-x64.dll
           curl -L -o libcrypto-1_1-x64.dll http://hienob.bargmy.ir/openssl/libcrypto-1_1-x64.dll
           
@@ -206,28 +199,20 @@ jobs:
           mkdir -p build
           cd build
           
-          # IMPORTANT: Set Install Prefix to /usr
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+          # Build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
           cmake --build . --config Release
           
-          # Install to AppDir
-          mkdir -p AppDir
-          make install DESTDIR=AppDir
-
-          # Get linuxdeployqt
-          wget -c -nv https://github.com/probonopd/linuxdeployqt/releases/download/continuous/linuxdeployqt-continuous-x86_64.AppImage
-          chmod +x linuxdeployqt-continuous-x86_64.AppImage
-
-          # Create .desktop file IF MISSING in correct location
-          # It MUST be in usr/share/applications/ inside AppDir
+          # Manual Install to AppDir (Fixes missing 'install' target)
+          mkdir -p AppDir/usr/bin
           mkdir -p AppDir/usr/share/applications
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps/
           
-          # If you have an icon, copy it: cp ../icon.png AppDir/usr/share/icons/hicolor/256x256/apps/NoveoDesktop.png
+          # Copy Binary
+          cp NoveoDesktop AppDir/usr/bin/
 
-          if [ ! -f "AppDir/usr/share/applications/NoveoDesktop.desktop" ]; then
-             echo "Creating desktop file..."
-             cat > AppDir/usr/share/applications/NoveoDesktop.desktop <<EOF
+          # Create Desktop File
+          cat > AppDir/usr/share/applications/NoveoDesktop.desktop <<EOF
           [Desktop Entry]
           Type=Application
           Name=NoveoDesktop
@@ -235,15 +220,20 @@ jobs:
           Icon=NoveoDesktop
           Categories=Utility;
           EOF
+          
+          # Copy Icon (optional, if exists)
+          if [ -f "../icon.png" ]; then
+            cp "../icon.png" AppDir/usr/share/icons/hicolor/256x256/apps/NoveoDesktop.png
           fi
 
-          # Use a variable for the desktop file path
-          DESKTOP="AppDir/usr/share/applications/NoveoDesktop.desktop"
+          # Get linuxdeployqt
+          wget -c -nv https://github.com/probonopd/linuxdeployqt/releases/download/continuous/linuxdeployqt-continuous-x86_64.AppImage
+          chmod +x linuxdeployqt-continuous-x86_64.AppImage
 
-          # Run linuxdeployqt
-          # -appimage: creates the AppImage
-          # -unsupported-allow-new-glibc: needed on newer runners
-          ./linuxdeployqt-continuous-x86_64.AppImage "$DESKTOP" -appimage -unsupported-allow-new-glibc -no-translations
+          # Bundle
+          # Point to the desktop file inside AppDir
+          ./linuxdeployqt-continuous-x86_64.AppImage AppDir/usr/share/applications/NoveoDesktop.desktop \
+             -appimage -unsupported-allow-new-glibc -no-translations
 
           # Rename Output
           APPIMAGE=$(ls *.AppImage | head -n 1)
@@ -293,34 +283,53 @@ jobs:
           mkdir -p build
           cd build
           
-          # FORCE x86_64 ARCHITECTURE
-          # Qt 5.15.2 OSS libs are x86_64 only. macOS runner is M1 (arm64).
-          # We must cross-compile for x86_64 to link successfully.
+          # Force x86_64 to match Qt libs
           cmake .. -DCMAKE_BUILD_TYPE=Release \
                    -DCMAKE_PREFIX_PATH="${Qt5_Dir}" \
                    -DCMAKE_OSX_ARCHITECTURES=x86_64
 
           cmake --build . --config Release
 
-          # Find .app
-          APP_BUNDLE=$(find . -name "*.app" | head -n 1)
-          if [ -z "$APP_BUNDLE" ]; then echo "Error: .app not found"; exit 1; fi
+          # Manually create .app bundle structure (Fixes missing .app error)
+          APP_NAME="NoveoDesktop.app"
+          mkdir -p "$APP_NAME/Contents/MacOS"
+          mkdir -p "$APP_NAME/Contents/Resources"
+          
+          # Move binary
+          cp NoveoDesktop "$APP_NAME/Contents/MacOS/"
+          
+          # Create minimal Info.plist
+          cat > "$APP_NAME/Contents/Info.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>NoveoDesktop</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.hienob.noveodesktop</string>
+              <key>CFBundleName</key>
+              <string>NoveoDesktop</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+          </dict>
+          </plist>
+          EOF
 
-          # Bundle Frameworks
-          macdeployqt "$APP_BUNDLE" -dmg
+          # Bundle Qt Frameworks
+          macdeployqt "$APP_NAME" -dmg -verbose=1
 
-          # Prepare ZIP (optional, if you prefer zip over DMG)
-          # Note: We label it x64 because it is an Intel build
-          ZIP_NAME="NoveoDesktop_${VERSION}_${DATE}_x64_MacOS.zip"
-          zip -r "$ZIP_NAME" "$APP_BUNDLE"
-
-          # Use DMG if generated
+          # Find DMG
           DMG_FILE=$(ls *.dmg 2>/dev/null | head -n 1 || true)
+          
           if [ -n "$DMG_FILE" ]; then
              NEW_DMG="NoveoDesktop_${VERSION}_${DATE}_x64_MacOS.dmg"
              mv "$DMG_FILE" "$NEW_DMG"
              FINAL_ASSET="$NEW_DMG"
           else
+             # Fallback to ZIP
+             ZIP_NAME="NoveoDesktop_${VERSION}_${DATE}_x64_MacOS.zip"
+             zip -r "$ZIP_NAME" "$APP_NAME"
              FINAL_ASSET="$ZIP_NAME"
           fi
 
