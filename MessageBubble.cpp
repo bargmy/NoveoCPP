@@ -33,7 +33,8 @@ MessageBubble::MessageBubble(const QString &text, const QString &senderName, qin
     if (!m_isMe) {
         // --- NAMETAG PARSING START ---
         // Regex to find "Name [#color, "TAG"]"
-        static QRegularExpression regex(R"(^(.*)\s\[#([a-fA-F0-9]{6}),\s*"(.*)"\]$)");
+        // CHANGED: Using standard escaped string instead of raw string
+        static QRegularExpression regex("^(.*)\\s\\[#([a-fA-F0-9]{6}),\\s*\"(.*)\"\\]$");
         QRegularExpressionMatch match = regex.match(senderName);
 
         QString displayName = senderName;
