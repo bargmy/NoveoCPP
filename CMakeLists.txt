@@ -25,6 +25,11 @@ set(HEADERS
 )
 
 # Added WIN32 here to hide the console window
-add_executable(NoveoDesktop WIN32 ${SOURCES} ${HEADERS})
+if(WIN32)
+    add_executable(NoveoDesktop WIN32 ${SOURCES} ${HEADERS})
+else()
+    add_executable(NoveoDesktop ${SOURCES} ${HEADERS})
+endif()
 
 target_link_libraries(NoveoDesktop PRIVATE Qt5::Widgets Qt5::Network Qt5::WebSockets Qt5::Gui)
+
