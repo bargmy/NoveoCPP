@@ -20,7 +20,7 @@
 #include <QTextDocument>
 #include <QAbstractTextDocumentLayout>
 #include <QDateTime>
-#include <QScrollBar> // <--- ADDED THIS TO FIX THE COMPILER ERROR
+#include <QScrollBar> 
 
 // ==========================================
 // 1. CONTACT LIST DELEGATE (Sidebar)
@@ -48,7 +48,7 @@ public:
             icon.paint(painter, rect.left() + padding, iconY, iconSize, iconSize);
         }
 
-        // Regex for Nametag
+        // Regex for Nametag (Fixed: Standard string instead of raw string)
         static QRegularExpression regex("^(.*)\\s\\[#([a-fA-F0-9]{6}),\\s*\"(.*)\"\\]$");
         QRegularExpressionMatch match = regex.match(fullText);
 
@@ -119,7 +119,7 @@ public:
     // Helper to calculate bubble geometry
     void getBubbleLayout(const QString &text, const QString &sender, bool isMe, int viewWidth,
                          QRect &bubbleRect, QRect &textRect, QRect &nameRect, QRect &avatarRect, int &neededHeight) const {
-        int maxBubbleWidth = viewWidth * 0.75; // Increased max width slightly
+        int maxBubbleWidth = viewWidth * 0.75; 
         int nameHeight = isMe ? 0 : 18; 
         int timeHeight = 12;
         int bubblePadding = 16; 
@@ -128,7 +128,7 @@ public:
         int sideMargin = 10;
 
         // 1. Calculate Name Width (Fix for Nametag sticking out)
-        static QRegularExpression regex(R"(^(.*)\s\[#([a-fA-F0-9]{6}),\s*"(.*)"\]$)");
+        static QRegularExpression regex("^(.*)\\s\\[#([a-fA-F0-9]{6}),\\s*\"(.*)\"\\]$");
         QRegularExpressionMatch match = regex.match(sender);
         QString displayName = sender;
         QString tagText;
@@ -225,7 +225,7 @@ public:
 
         // Draw Name (if not me)
         if (!isMe) {
-            static QRegularExpression regex(R"(^(.*)\s\[#([a-fA-F0-9]{6}),\s*"(.*)"\]$)");
+            static QRegularExpression regex("^(.*)\\s\\[#([a-fA-F0-9]{6}),\\s*\"(.*)\"\\]$");
             QRegularExpressionMatch match = regex.match(sender);
             QString displayName = sender;
             QString tagText;
@@ -338,8 +338,6 @@ MainWindow::~MainWindow() {}
 
 void MainWindow::resizeEvent(QResizeEvent *event) {
     QMainWindow::resizeEvent(event);
-    // Force relayout of chat bubbles on resize
-    // m_chatList->scheduleDelayedItemsLayout(); 
 }
 
 void MainWindow::setupUi() {
@@ -456,7 +454,7 @@ void MainWindow::setupUi() {
     inputLayout->addWidget(m_sendBtn);
 
     chatAreaLayout->addWidget(header);
-    chatAreaLayout->addWidget(m_chatList); // Add List instead of ScrollArea
+    chatAreaLayout->addWidget(m_chatList); 
     chatAreaLayout->addWidget(inputArea);
 
     appLayout->addWidget(m_sidebarTabs);
@@ -493,7 +491,7 @@ void MainWindow::applyTheme() {
         "QTabBar::tab:selected { border-bottom: 2px solid #0088cc; }"
         "#chatHeader { background-color: %2; border-bottom: 1px solid %4; }"
         "#inputArea { background-color: %2; border-top: 1px solid %4; }"
-        "#chatList { background-color: %1; border: none; }" // Styled List
+        "#chatList { background-color: %1; border: none; }" 
     ).arg(bg, panelBg, text, border, inputBg, listHover);
 
     setStyleSheet(style);
@@ -695,9 +693,6 @@ void MainWindow::renderMessages(const QString &chatId) {
 
     if (m_chats.contains(chatId)) {
         const auto &msgs = m_chats[chatId].messages;
-        
-        // With QListWidget + Delegate, we can render thousands of items smoothly.
-        // No need to limit to 50 anymore. The viewport handles it.
         for (const auto &msg : msgs) {
             addMessageBubble(msg, false, false);
         }
@@ -725,8 +720,7 @@ void MainWindow::addMessageBubble(const Message &msg, bool appendStretch, bool a
     item->setData(Qt::UserRole + 3, msg.timestamp);
     item->setData(Qt::UserRole + 4, isMe);
     
-    // Set Avatar Icon (Qt::DecorationRole)
-    // Only set it if it's not me (Telegram style)
+    // Set Avatar Icon (Qt::DecorationRole) - PFP Feature
     if (!isMe) {
         item->setIcon(getAvatar(senderName, avatarUrl));
     }
