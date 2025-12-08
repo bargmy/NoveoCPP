@@ -20,6 +20,7 @@ public:
     
     // NEW: Function to request older messages
     void fetchHistory(const QString &chatId, qint64 beforeTimestamp);
+    void logout();
 
     bool isConnected() const;
     QString currentUserId() const { return m_currentUser.userId; }
