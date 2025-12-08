@@ -22,6 +22,7 @@
 #include <QStyledItemDelegate>
 #include <QRegularExpression>
 #include <QCheckBox>
+#include <QApplication> // <--- ADDED THIS TO FIX INCOMPLETE TYPE ERROR
 
 // --- Custom Delegate for Efficient List Rendering & Nametags ---
 class UserListDelegate : public QStyledItemDelegate {
@@ -51,7 +52,8 @@ public:
         }
 
         // 4. Parse Nametag: Name [#color, "Tag"]
-        static QRegularExpression regex(R"(^(.*)\s\[#([a-fA-F0-9]{6}),\s*"(.*)"\]$)");
+        // CHANGED: Using standard escaped string instead of raw string to avoid compiler errors
+        static QRegularExpression regex("^(.*)\\s\\[#([a-fA-F0-9]{6}),\\s*\"(.*)\"\\]$");
         QRegularExpressionMatch match = regex.match(fullText);
 
         QString name;
