@@ -14,8 +14,11 @@ set(SOURCES
     MainWindow.cpp
     WebSocketClient.cpp
     MessageBubble.cpp
-    version.rc
 )
+
+if(WIN32)
+    list(APPEND SOURCES version.rc)
+endif()
 
 set(HEADERS
     MainWindow.h
@@ -32,4 +35,5 @@ else()
 endif()
 
 target_link_libraries(NoveoDesktop PRIVATE Qt5::Widgets Qt5::Network Qt5::WebSockets Qt5::Gui)
+
 
