@@ -201,34 +201,32 @@ jobs:
           DATE: ${{ needs.prepare.outputs.build_date }}
         run: |
           set -e
-          # ARCH detection
-          ARCH="$(uname -m)"
-          case "$ARCH" in
-            x86_64) ARCH_LABEL="x64" ;;
-            aarch64) ARCH_LABEL="arm64" ;;
-            *) ARCH_LABEL="$ARCH" ;;
-          esac
-
           export PATH="${Qt5_Dir}/bin:$PATH"
 
           mkdir -p build
           cd build
+          
+          # IMPORTANT: Set Install Prefix to /usr
           cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
           cmake --build . --config Release
           
-          # Install to AppDir for bundling
+          # Install to AppDir
           mkdir -p AppDir
-          DESTDIR=AppDir cmake --install .
+          make install DESTDIR=AppDir
 
           # Get linuxdeployqt
           wget -c -nv https://github.com/probonopd/linuxdeployqt/releases/download/continuous/linuxdeployqt-continuous-x86_64.AppImage
           chmod +x linuxdeployqt-continuous-x86_64.AppImage
 
-          # Find desktop file
-          DESKTOP_FILE=$(find AppDir/usr/share/applications -name "*.desktop" | head -n 1)
-          if [ -z "$DESKTOP_FILE" ]; then
-             echo "Creating minimal desktop file..."
-             mkdir -p AppDir/usr/share/applications
+          # Create .desktop file IF MISSING in correct location
+          # It MUST be in usr/share/applications/ inside AppDir
+          mkdir -p AppDir/usr/share/applications
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps/
+          
+          # If you have an icon, copy it: cp ../icon.png AppDir/usr/share/icons/hicolor/256x256/apps/NoveoDesktop.png
+
+          if [ ! -f "AppDir/usr/share/applications/NoveoDesktop.desktop" ]; then
+             echo "Creating desktop file..."
              cat > AppDir/usr/share/applications/NoveoDesktop.desktop <<EOF
           [Desktop Entry]
           Type=Application
@@ -237,16 +235,19 @@ jobs:
           Icon=NoveoDesktop
           Categories=Utility;
           EOF
-             DESKTOP_FILE="AppDir/usr/share/applications/NoveoDesktop.desktop"
           fi
 
-          # Bundle
-          # -unsupported-allow-new-glibc is often needed on newer ubuntu runners
-          ./linuxdeployqt-continuous-x86_64.AppImage "$DESKTOP_FILE" -appimage -unsupported-allow-new-glibc -no-translations
+          # Use a variable for the desktop file path
+          DESKTOP="AppDir/usr/share/applications/NoveoDesktop.desktop"
+
+          # Run linuxdeployqt
+          # -appimage: creates the AppImage
+          # -unsupported-allow-new-glibc: needed on newer runners
+          ./linuxdeployqt-continuous-x86_64.AppImage "$DESKTOP" -appimage -unsupported-allow-new-glibc -no-translations
 
           # Rename Output
           APPIMAGE=$(ls *.AppImage | head -n 1)
-          NEW_NAME="NoveoDesktop_${VERSION}_${DATE}_${ARCH_LABEL}_Ubuntu.AppImage"
+          NEW_NAME="NoveoDesktop_${VERSION}_${DATE}_x64_Ubuntu.AppImage"
           mv "$APPIMAGE" "$NEW_NAME"
           
           echo "LINUX_ASSET=build/$NEW_NAME" >> $GITHUB_ENV
@@ -289,16 +290,16 @@ jobs:
           set -e
           export PATH="${Qt5_Dir}/bin:$PATH"
           
-          ARCH="$(uname -m)"
-          case "$ARCH" in
-            x86_64) ARCH_LABEL="x64" ;;
-            arm64) ARCH_LABEL="arm64" ;;
-            *) ARCH_LABEL="$ARCH" ;;
-          esac
-
           mkdir -p build
           cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="${Qt5_Dir}"
+          
+          # FORCE x86_64 ARCHITECTURE
+          # Qt 5.15.2 OSS libs are x86_64 only. macOS runner is M1 (arm64).
+          # We must cross-compile for x86_64 to link successfully.
+          cmake .. -DCMAKE_BUILD_TYPE=Release \
+                   -DCMAKE_PREFIX_PATH="${Qt5_Dir}" \
+                   -DCMAKE_OSX_ARCHITECTURES=x86_64
+
           cmake --build . --config Release
 
           # Find .app
@@ -309,15 +310,14 @@ jobs:
           macdeployqt "$APP_BUNDLE" -dmg
 
           # Prepare ZIP (optional, if you prefer zip over DMG)
-          ZIP_NAME="NoveoDesktop_${VERSION}_${DATE}_${ARCH_LABEL}_MacOS.zip"
+          # Note: We label it x64 because it is an Intel build
+          ZIP_NAME="NoveoDesktop_${VERSION}_${DATE}_x64_MacOS.zip"
           zip -r "$ZIP_NAME" "$APP_BUNDLE"
 
-          # Use DMG if generated, else ZIP
+          # Use DMG if generated
           DMG_FILE=$(ls *.dmg 2>/dev/null | head -n 1 || true)
           if [ -n "$DMG_FILE" ]; then
-             FINAL_ASSET="$DMG_FILE"
-             # Rename DMG to match pattern
-             NEW_DMG="NoveoDesktop_${VERSION}_${DATE}_${ARCH_LABEL}_MacOS.dmg"
+             NEW_DMG="NoveoDesktop_${VERSION}_${DATE}_x64_MacOS.dmg"
              mv "$DMG_FILE" "$NEW_DMG"
              FINAL_ASSET="$NEW_DMG"
           else
