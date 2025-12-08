@@ -75,7 +75,7 @@ jobs:
           fi
 
   # =========================================================
-  # WINDOWS BUILD
+  # WINDOWS BUILD (Fixed Missing DLLs)
   # =========================================================
   build-windows:
     needs: prepare
@@ -112,42 +112,48 @@ jobs:
           IFS='.' read -r MAJOR MINOR PATCH <<< "$VER_NO_V"
           RC_NUM="${MAJOR},${MINOR},${PATCH},0"
           RC_STR="${MAJOR}.${MINOR}.${PATCH}.0"
-
-          echo "Updating version.rc to $RC_STR..."
           RC_FILE="version.rc"
           if [ -f "$RC_FILE" ]; then
+            echo "Updating version.rc to $RC_STR..."
             sed -i -E "s/FILEVERSION[ \t]+[0-9,]+/FILEVERSION     ${RC_NUM}/" "$RC_FILE"
             sed -i -E "s/PRODUCTVERSION[ \t]+[0-9,]+/PRODUCTVERSION  ${RC_NUM}/" "$RC_FILE"
             sed -i -E "s/(\"FileVersion\",[ \t]*\")[0-9.]+(\".*)/\1${RC_STR}\2/" "$RC_FILE"
             sed -i -E "s/(\"ProductVersion\",[ \t]*\")[0-9.]+(\".*)/\1${RC_STR}\2/" "$RC_FILE"
           else
-            echo "WARNING: version.rc not found, skipping update."
+            echo "WARNING: version.rc not found."
           fi
 
-          # 2. Configure Environment
+          # 2. Build
           export QT_ROOT="${Qt5_Dir}"
           export MINGW_BIN="${IQTA_TOOLS}/mingw810_64/bin"
           export PATH="$MINGW_BIN:$QT_ROOT/bin:$PATH"
-          export QT_PLUGIN_PATH="${QT_ROOT}/plugins"
 
           mkdir -p build
           cd build
           cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
           cmake --build . --config Release
 
-          # 3. Deploy Qt DLLs
-          "$QT_ROOT/bin/windeployqt.exe" --release --no-translations --no-compiler-runtime --dir . ./NoveoDesktop.exe || true
+          # 3. FORCE COPY DLLs (Fixes "Qt5Network.dll not found")
+          echo "Forcing copy of core Qt DLLs..."
+          cp "$QT_ROOT/bin/Qt5Core.dll" .
+          cp "$QT_ROOT/bin/Qt5Gui.dll" .
+          cp "$QT_ROOT/bin/Qt5Widgets.dll" .
+          cp "$QT_ROOT/bin/Qt5Network.dll" .
+          cp "$QT_ROOT/bin/Qt5WebSockets.dll" .
 
-          # 4. Download OpenSSL
+          # 4. Run windeployqt (handles plugins/platforms)
+          "$QT_ROOT/bin/windeployqt.exe" --release --no-translations --no-compiler-runtime --no-opengl-sw --dir . ./NoveoDesktop.exe || true
+
+          # 5. Download OpenSSL
           curl -L -o libssl-1_1-x64.dll http://hienob.bargmy.ir/openssl/libssl-1_1-x64.dll
           curl -L -o libcrypto-1_1-x64.dll http://hienob.bargmy.ir/openssl/libcrypto-1_1-x64.dll
           
-          # 5. MinGW Runtimes
+          # 6. MinGW Runtimes
           cp "$MINGW_BIN/libgcc_s_seh-1.dll" . || true
           cp "$MINGW_BIN/libstdc++-6.dll" . || true
           cp "$MINGW_BIN/libwinpthread-1.dll" . || true
 
-          # 6. Zip Artifact
+          # 7. Zip
           ZIP_NAME="NoveoDesktop_${VERSION}_${DATE}_x64_Windows.zip"
           7z a "$ZIP_NAME" * -xr!*.obj -xr!*.cpp -xr!*.h -xr!Makefile -xr!CMakeFiles -xr!*_autogen
 
@@ -162,7 +168,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # =========================================================
-  # LINUX BUILD (AppImage)
+  # LINUX BUILD (Fixed install error)
   # =========================================================
   build-linux:
     needs: prepare
@@ -199,16 +205,14 @@ jobs:
           mkdir -p build
           cd build
           
-          # Build
           cmake .. -DCMAKE_BUILD_TYPE=Release
           cmake --build . --config Release
           
-          # Manual Install to AppDir (Fixes missing 'install' target)
+          # Fix "No rule to make target install" -> Manually copy
           mkdir -p AppDir/usr/bin
           mkdir -p AppDir/usr/share/applications
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps/
           
-          # Copy Binary
           cp NoveoDesktop AppDir/usr/bin/
 
           # Create Desktop File
@@ -221,21 +225,17 @@ jobs:
           Categories=Utility;
           EOF
           
-          # Copy Icon (optional, if exists)
           if [ -f "../icon.png" ]; then
             cp "../icon.png" AppDir/usr/share/icons/hicolor/256x256/apps/NoveoDesktop.png
           fi
 
-          # Get linuxdeployqt
+          # LinuxDeployQt
           wget -c -nv https://github.com/probonopd/linuxdeployqt/releases/download/continuous/linuxdeployqt-continuous-x86_64.AppImage
           chmod +x linuxdeployqt-continuous-x86_64.AppImage
 
-          # Bundle
-          # Point to the desktop file inside AppDir
           ./linuxdeployqt-continuous-x86_64.AppImage AppDir/usr/share/applications/NoveoDesktop.desktop \
              -appimage -unsupported-allow-new-glibc -no-translations
 
-          # Rename Output
           APPIMAGE=$(ls *.AppImage | head -n 1)
           NEW_NAME="NoveoDesktop_${VERSION}_${DATE}_x64_Ubuntu.AppImage"
           mv "$APPIMAGE" "$NEW_NAME"
@@ -251,7 +251,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # =========================================================
-  # MACOS BUILD
+  # MACOS BUILD (Fixed .app error)
   # =========================================================
   build-macos:
     needs: prepare
@@ -283,62 +283,9 @@ jobs:
           mkdir -p build
           cd build
           
-          # Force x86_64 to match Qt libs
+          # Fix arm64 linking error -> Force x86_64
           cmake .. -DCMAKE_BUILD_TYPE=Release \
                    -DCMAKE_PREFIX_PATH="${Qt5_Dir}" \
                    -DCMAKE_OSX_ARCHITECTURES=x86_64
 
-          cmake --build . --config Release
-
-          # Manually create .app bundle structure (Fixes missing .app error)
-          APP_NAME="NoveoDesktop.app"
-          mkdir -p "$APP_NAME/Contents/MacOS"
-          mkdir -p "$APP_NAME/Contents/Resources"
-          
-          # Move binary
-          cp NoveoDesktop "$APP_NAME/Contents/MacOS/"
-          
-          # Create minimal Info.plist
-          cat > "$APP_NAME/Contents/Info.plist" <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>CFBundleExecutable</key>
-              <string>NoveoDesktop</string>
-              <key>CFBundleIdentifier</key>
-              <string>com.hienob.noveodesktop</string>
-              <key>CFBundleName</key>
-              <string>NoveoDesktop</string>
-              <key>CFBundlePackageType</key>
-              <string>APPL</string>
-          </dict>
-          </plist>
-          EOF
-
-          # Bundle Qt Frameworks
-          macdeployqt "$APP_NAME" -dmg -verbose=1
-
-          # Find DMG
-          DMG_FILE=$(ls *.dmg 2>/dev/null | head -n 1 || true)
-          
-          if [ -n "$DMG_FILE" ]; then
-             NEW_DMG="NoveoDesktop_${VERSION}_${DATE}_x64_MacOS.dmg"
-             mv "$DMG_FILE" "$NEW_DMG"
-             FINAL_ASSET="$NEW_DMG"
-          else
-             # Fallback to ZIP
-             ZIP_NAME="NoveoDesktop_${VERSION}_${DATE}_x64_MacOS.zip"
-             zip -r "$ZIP_NAME" "$APP_NAME"
-             FINAL_ASSET="$ZIP_NAME"
-          fi
-
-          echo "MAC_ASSET=build/$FINAL_ASSET" >> $GITHUB_ENV
-
-      - name: Upload MacOS Asset
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ needs.prepare.outputs.new_version }}
-          files: ${{ env.MAC_ASSET }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          cmake --build . --config
