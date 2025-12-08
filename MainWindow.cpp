@@ -48,7 +48,7 @@ public:
             icon.paint(painter, rect.left() + padding, iconY, iconSize, iconSize);
         }
 
-        // Regex for Nametag (Fixed: Standard string instead of raw string)
+        // Regex for Nametag
         static QRegularExpression regex("^(.*)\\s\\[#([a-fA-F0-9]{6}),\\s*\"(.*)\"\\]$");
         QRegularExpressionMatch match = regex.match(fullText);
 
@@ -113,8 +113,13 @@ public:
 // 2. MESSAGE DELEGATE (Chat Area)
 // ==========================================
 class MessageDelegate : public QStyledItemDelegate {
+    bool m_isDarkMode = false;
 public:
     using QStyledItemDelegate::QStyledItemDelegate;
+
+    void setTheme(bool isDarkMode) {
+        m_isDarkMode = isDarkMode;
+    }
 
     // Helper to calculate bubble geometry
     void getBubbleLayout(const QString &text, const QString &sender, bool isMe, int viewWidth,
@@ -139,21 +144,25 @@ public:
             hasTag = true;
         }
 
-        // Measure Name
-        QFont nameFont("Segoe UI", 11);
-        nameFont.setBold(true);
-        QFontMetrics fm(nameFont);
-        int nameTextW = fm.horizontalAdvance(displayName);
-        
-        // Measure Tag
-        int tagW = 0;
-        if (hasTag) {
-            QFont tagFont("Segoe UI", 9);
-            tagFont.setBold(true);
-            QFontMetrics tagFm(tagFont);
-            tagW = tagFm.horizontalAdvance(tagText) + 12; // +padding inside tag
+        int totalNameWidth = 0;
+        // Only calculate name width contribution if it's NOT me (since I don't see my own name)
+        if (!isMe) {
+            // Measure Name
+            QFont nameFont("Segoe UI", 11);
+            nameFont.setBold(true);
+            QFontMetrics fm(nameFont);
+            int nameTextW = fm.horizontalAdvance(displayName);
+            
+            // Measure Tag
+            int tagW = 0;
+            if (hasTag) {
+                QFont tagFont("Segoe UI", 9);
+                tagFont.setBold(true);
+                QFontMetrics tagFm(tagFont);
+                tagW = tagFm.horizontalAdvance(tagText) + 12; // +padding inside tag
+            }
+            totalNameWidth = nameTextW + (hasTag ? (tagW + 8) : 0);
         }
-        int totalNameWidth = nameTextW + (hasTag ? (tagW + 8) : 0);
 
         // 2. Calculate Text Height
         QTextDocument doc;
@@ -164,8 +173,11 @@ public:
         int textHeight = doc.size().height();
 
         // 3. Determine Bubble Dimensions
-        // Width is max of text width OR name width (plus padding)
-        int bubbleW = qMax(textWidth + 20, qMax(totalNameWidth + 30, 100));
+        // FIX: If isMe, don't let a long username force the bubble to be wide.
+        // We only care about text width for 'me'.
+        int contentWidth = isMe ? (textWidth + 20) : qMax(textWidth + 20, totalNameWidth + 30);
+        int bubbleW = qMax(contentWidth, 60); // Reduced min width from 100 to 60
+
         int bubbleH = textHeight + nameHeight + timeHeight + bubblePadding;
         neededHeight = bubbleH + 10; // +10 for external margin
 
@@ -218,9 +230,27 @@ public:
         }
 
         // Draw Bubble Background
-        QColor bubbleColor = isMe ? QColor("#EEFFDE") : Qt::white;
+        QColor bubbleColor;
+        QColor borderColor;
+        QColor textColor;
+        QColor timeColor;
+
+        if (m_isDarkMode) {
+            // Dark Mode Colors
+            bubbleColor = isMe ? QColor("#2b5278") : QColor("#2d2d2d"); // Telegram-ish Dark Blue vs Dark Grey
+            borderColor = Qt::transparent; // No border in dark mode usually looks cleaner
+            textColor = Qt::white;
+            timeColor = QColor("#a0a0a0");
+        } else {
+            // Light Mode Colors
+            bubbleColor = isMe ? QColor("#EEFFDE") : Qt::white;
+            borderColor = QColor("#d0d0d0");
+            textColor = Qt::black;
+            timeColor = QColor("#888888");
+        }
+
         painter->setBrush(bubbleColor);
-        painter->setPen(QPen(QColor("#d0d0d0"), 1));
+        painter->setPen(borderColor == Qt::transparent ? Qt::NoPen : QPen(borderColor, 1));
         painter->drawRoundedRect(bubbleRect, 12, 12);
 
         // Draw Name (if not me)
@@ -240,7 +270,7 @@ public:
             }
 
             // Draw Display Name
-            painter->setPen(QColor("#E35967"));
+            painter->setPen(QColor("#E35967")); // Keep name colored for distinction
             QFont nameFont = option.font;
             nameFont.setPixelSize(11);
             nameFont.setBold(true);
@@ -269,11 +299,23 @@ public:
         }
 
         // Draw Message Text
-        painter->setPen(Qt::black);
+        painter->setPen(textColor);
         QTextDocument doc;
         QFont textFont("Segoe UI", 10);
         doc.setDefaultFont(textFont);
-        doc.setPlainText(text);
+        
+        // CSS for text color in document if needed (mostly handles links, but basic text color is set via QPainter if not overridden)
+        // However, QTextDocument uses the palette or html. Let's force color via generic HTML or Palette.
+        // Easiest is to set the DefaultTextOption or stylesheet on doc, but for simple text:
+        QPalette p = doc.defaultTextOption().textDirection() == Qt::RightToLeft ? QApplication::palette() : QApplication::palette();
+        p.setColor(QPalette::Text, textColor);
+        // Actually, doc.drawContents uses the painter's pen for some things but might default to black. 
+        // Let's wrap in HTML to be sure about color if standard draw doesn't respect it 100%
+        QString html = QString("<span style='color:%1;'>%2</span>")
+                       .arg(textColor.name())
+                       .arg(text.toHtmlEscaped().replace("\n", "<br>"));
+        doc.setHtml(html);
+
         doc.setTextWidth(textRect.width());
         painter->translate(textRect.topLeft());
         doc.drawContents(painter);
@@ -283,7 +325,7 @@ public:
         QDateTime dt;
         dt.setSecsSinceEpoch(timestamp);
         QString timeStr = dt.toString("hh:mm AP");
-        painter->setPen(QColor("#888888"));
+        painter->setPen(timeColor);
         QFont timeFont = option.font;
         timeFont.setPixelSize(9);
         painter->setFont(timeFont);
@@ -509,6 +551,15 @@ void MainWindow::applyTheme() {
     ).arg(bg, panelBg, text, border, inputBg, listHover, scrollHandle, scrollHandleHover);
 
     setStyleSheet(style);
+
+    // Update Delegate Theme
+    if (m_chatList->itemDelegate()) {
+        MessageDelegate *delegate = qobject_cast<MessageDelegate*>(m_chatList->itemDelegate());
+        if (delegate) {
+            delegate->setTheme(m_isDarkMode);
+            m_chatList->viewport()->update(); // Force repaint
+        }
+    }
 }
 
 void MainWindow::onDarkModeToggled(bool checked) {
