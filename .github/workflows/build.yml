@@ -75,7 +75,7 @@ jobs:
           fi
 
   # =========================================================
-  # WINDOWS BUILD (Fixed Platform Plugin Error)
+  # WINDOWS BUILD (Fixed: Manual DLL & Plugin Copy)
   # =========================================================
   build-windows:
     needs: prepare
@@ -101,8 +101,6 @@ jobs:
         shell: bash
         env:
           QT_ROOT: ${{ env.Qt5_Dir }}
-          # FIX: Explicitly point to plugins so windeployqt can find them
-          QT_PLUGIN_PATH: ${{ env.Qt5_Dir }}/plugins
           MINGW_BIN: ${{ env.IQTA_TOOLS }}/mingw810_64/bin
           VERSION: ${{ needs.prepare.outputs.new_version }}
           DATE: ${{ needs.prepare.outputs.build_date }}
@@ -133,13 +131,26 @@ jobs:
           cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
           cmake --build . 
 
-          # 3. DEPLOY
-          # --compiler-runtime includes libgcc/stdcpp
-          # --dir . puts them next to exe
-          # FIX: QT_PLUGIN_PATH env var above allows windeployqt to find 'platforms'
-          "$QT_ROOT/bin/windeployqt.exe" --release --no-translations --compiler-runtime --no-opengl-sw --dir . ./NoveoDesktop.exe
+          # 3. MANUAL DEPLOYMENT (Robust against windeployqt failure)
+          echo "Executing manual DLL deployment..."
+          
+          # Copy Qt Modules
+          cp "$QT_ROOT/bin/Qt5Core.dll" .
+          cp "$QT_ROOT/bin/Qt5Gui.dll" .
+          cp "$QT_ROOT/bin/Qt5Widgets.dll" .
+          cp "$QT_ROOT/bin/Qt5Network.dll" .
+          cp "$QT_ROOT/bin/Qt5WebSockets.dll" .
+          
+          # Copy MinGW Runtime
+          cp "$MINGW_BIN/libgcc_s_seh-1.dll" .
+          cp "$MINGW_BIN/libstdc++-6.dll" .
+          cp "$MINGW_BIN/libwinpthread-1.dll" .
 
-          # 4. Download OpenSSL (Required for HTTPS/WebSockets)
+          # Copy Platform Plugin (CRITICAL FIX)
+          mkdir -p platforms
+          cp "$QT_ROOT/plugins/platforms/qwindows.dll" platforms/
+          
+          # 4. Download OpenSSL
           curl -L -o libssl-1_1-x64.dll http://hienob.bargmy.ir/openssl/libssl-1_1-x64.dll
           curl -L -o libcrypto-1_1-x64.dll http://hienob.bargmy.ir/openssl/libcrypto-1_1-x64.dll
           
@@ -158,7 +169,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # =========================================================
-  # LINUX BUILD (Fixed Icon .ico conversion)
+  # LINUX BUILD (Fixed: Removed Icon Requirement)
   # =========================================================
   build-linux:
     needs: prepare
@@ -182,7 +193,7 @@ jobs:
       - name: Install Deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libgl1-mesa-dev cmake wget file imagemagick
+          sudo apt-get install -y build-essential libgl1-mesa-dev cmake wget file
 
       - name: Build and Bundle
         env:
@@ -201,31 +212,19 @@ jobs:
           # Prepare AppDir
           mkdir -p AppDir/usr/bin
           mkdir -p AppDir/usr/share/applications
-          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps/
+          # mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps/  <-- SKIP ICON DIRS
           
           cp NoveoDesktop AppDir/usr/bin/
 
-          # Create Desktop File
+          # Create Desktop File (SKIP ICON entry to prevent linuxdeployqt crash)
           cat > AppDir/usr/share/applications/NoveoDesktop.desktop <<EOF
           [Desktop Entry]
           Type=Application
           Name=NoveoDesktop
           Exec=NoveoDesktop
-          Icon=NoveoDesktop
           Categories=Utility;
           EOF
           
-          # FIX: Handle icon.ico by converting to png
-          if [ -f "../icon.ico" ]; then
-            echo "Converting icon.ico to png..."
-            convert "../icon.ico" -resize 256x256 AppDir/usr/share/icons/hicolor/256x256/apps/NoveoDesktop.png
-          elif [ -f "../icon.png" ]; then
-            cp "../icon.png" AppDir/usr/share/icons/hicolor/256x256/apps/NoveoDesktop.png
-          else
-            echo "ERROR: No icon.ico or icon.png found! linuxdeployqt requires an icon."
-            exit 1
-          fi
-
           # LinuxDeployQt
           wget -c -nv https://github.com/probonopd/linuxdeployqt/releases/download/continuous/linuxdeployqt-continuous-x86_64.AppImage
           chmod +x linuxdeployqt-continuous-x86_64.AppImage
@@ -248,7 +247,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # =========================================================
-  # MACOS BUILD (Fixed CMake Config Flag)
+  # MACOS BUILD (Fixed CMake Config)
   # =========================================================
   build-macos:
     needs: prepare
@@ -285,10 +284,10 @@ jobs:
                    -DCMAKE_PREFIX_PATH="${Qt5_Dir}" \
                    -DCMAKE_OSX_ARCHITECTURES=x86_64
 
-          # FIX: Removed invalid "--config Release"
+          # Removed "--config Release"
           cmake --build . 
 
-          # Manual .app structure (kept per your request/previous logic)
+          # Manual .app structure
           APP_NAME="NoveoDesktop.app"
           mkdir -p "$APP_NAME/Contents/MacOS"
           mkdir -p "$APP_NAME/Contents/Resources"
