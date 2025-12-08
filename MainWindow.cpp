@@ -1,5 +1,5 @@
 #include "MainWindow.h"
-// MessageBubble.h is no longer needed for rendering, but we keep the file if you want
+// MessageBubble.h is no longer needed for rendering.
 // We now use a Delegate for chat messages.
 
 #include <QVBoxLayout>
@@ -173,10 +173,9 @@ public:
         int textHeight = doc.size().height();
 
         // 3. Determine Bubble Dimensions
-        // FIX: If isMe, don't let a long username force the bubble to be wide.
-        // We only care about text width for 'me'.
+        // If isMe, don't let a long username force the bubble to be wide.
         int contentWidth = isMe ? (textWidth + 20) : qMax(textWidth + 20, totalNameWidth + 30);
-        int bubbleW = qMax(contentWidth, 60); // Reduced min width from 100 to 60
+        int bubbleW = qMax(contentWidth, 60); 
 
         int bubbleH = textHeight + nameHeight + timeHeight + bubblePadding;
         neededHeight = bubbleH + 10; // +10 for external margin
@@ -212,7 +211,7 @@ public:
         QString sender = index.data(Qt::UserRole + 2).toString();
         qint64 timestamp = index.data(Qt::UserRole + 3).toLongLong();
         bool isMe = index.data(Qt::UserRole + 4).toBool();
-        QIcon avatar = qvariant_cast<QIcon>(index.data(Qt::DecorationRole)); // Retrieve Avatar
+        QIcon avatar = qvariant_cast<QIcon>(index.data(Qt::DecorationRole)); 
 
         QRect bubbleRect, textRect, nameRect, avatarRect;
         int neededHeight;
@@ -237,8 +236,8 @@ public:
 
         if (m_isDarkMode) {
             // Dark Mode Colors
-            bubbleColor = isMe ? QColor("#2b5278") : QColor("#2d2d2d"); // Telegram-ish Dark Blue vs Dark Grey
-            borderColor = Qt::transparent; // No border in dark mode usually looks cleaner
+            bubbleColor = isMe ? QColor("#2b5278") : QColor("#2d2d2d"); 
+            borderColor = Qt::transparent; 
             textColor = Qt::white;
             timeColor = QColor("#a0a0a0");
         } else {
@@ -270,7 +269,7 @@ public:
             }
 
             // Draw Display Name
-            painter->setPen(QColor("#E35967")); // Keep name colored for distinction
+            painter->setPen(QColor("#E35967")); 
             QFont nameFont = option.font;
             nameFont.setPixelSize(11);
             nameFont.setBold(true);
@@ -304,13 +303,7 @@ public:
         QFont textFont("Segoe UI", 10);
         doc.setDefaultFont(textFont);
         
-        // CSS for text color in document if needed (mostly handles links, but basic text color is set via QPainter if not overridden)
-        // However, QTextDocument uses the palette or html. Let's force color via generic HTML or Palette.
-        // Easiest is to set the DefaultTextOption or stylesheet on doc, but for simple text:
-        QPalette p = doc.defaultTextOption().textDirection() == Qt::RightToLeft ? QApplication::palette() : QApplication::palette();
-        p.setColor(QPalette::Text, textColor);
-        // Actually, doc.drawContents uses the painter's pen for some things but might default to black. 
-        // Let's wrap in HTML to be sure about color if standard draw doesn't respect it 100%
+        // Ensure text color is applied
         QString html = QString("<span style='color:%1;'>%2</span>")
                        .arg(textColor.name())
                        .arg(text.toHtmlEscaped().replace("\n", "<br>"));
@@ -554,7 +547,9 @@ void MainWindow::applyTheme() {
 
     // Update Delegate Theme
     if (m_chatList->itemDelegate()) {
-        MessageDelegate *delegate = qobject_cast<MessageDelegate*>(m_chatList->itemDelegate());
+        // Use dynamic_cast instead of qobject_cast because MessageDelegate 
+        // does not have Q_OBJECT macro (defined in .cpp file)
+        MessageDelegate *delegate = dynamic_cast<MessageDelegate*>(m_chatList->itemDelegate());
         if (delegate) {
             delegate->setTheme(m_isDarkMode);
             m_chatList->viewport()->update(); // Force repaint
