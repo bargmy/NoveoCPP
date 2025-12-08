@@ -20,6 +20,7 @@
 #include <QTextDocument>
 #include <QAbstractTextDocumentLayout>
 #include <QDateTime>
+#include <QScrollBar> // <--- ADDED THIS TO FIX THE COMPILER ERROR
 
 // ==========================================
 // 1. CONTACT LIST DELEGATE (Sidebar)
