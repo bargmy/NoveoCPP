@@ -20,6 +20,7 @@
 #include <QScrollBar> 
 #include <QSet>
 #include <QNetworkRequest>
+#include <QPainterPath>
 
 // Custom role to store the avatar URL in items for updating later
 const int AvatarUrlRole = Qt::UserRole + 10;
@@ -989,3 +990,4 @@ void MainWindow::onSendBtnClicked() {
     m_client->sendMessage(m_currentChatId, text);
     m_messageInput->clear();
 }
+
