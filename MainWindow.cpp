@@ -18,14 +18,14 @@
 #include <QRegularExpression>
 #include <QPainter>
 #include <QAbstractItemView>
-#include <QLineEdit>        // Missing
-#include <QLabel>           // Missing
-#include <QPushButton>      // Missing
-#include <QStackedWidget>   // Missing
-#include <QCheckBox>        // Missing
-#include <QTextDocument>    // Missing
-#include <QListWidget>      // Missing
-#include <QTabWidget>       // Missing
+#include <QLineEdit>        
+#include <QLabel>           
+#include <QPushButton>      
+#include <QStackedWidget>   
+#include <QCheckBox>        
+#include <QTextDocument>    
+#include <QListWidget>      
+#include <QTabWidget>       
 
 // ==========================================
 // MESSAGE DELEGATE
@@ -616,7 +616,8 @@ void MainWindow::addMessageBubble(const Message &msg) {
 void MainWindow::loadAvatar(const QString &url, const QString &id, bool isChat) {
     if (m_avatarCache.contains(id)) return; 
     
-    QNetworkRequest req(QUrl(url));
+    // --- FIX: USE UNIFORM INITIALIZATION TO AVOID AMBIGUITY ---
+    QNetworkRequest req{QUrl(url)};
     QNetworkReply *reply = m_nam->get(req);
     reply->setProperty("targetId", id);
     reply->setProperty("isChat", isChat);
