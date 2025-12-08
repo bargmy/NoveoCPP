@@ -553,12 +553,38 @@ void MainWindow::onDarkModeToggled(bool checked) {
 }
 
 void MainWindow::onLogoutClicked() {
+    // 1. Clear Settings
     QSettings settings("Noveo", "MessengerClient");
     settings.remove("username");
     settings.remove("password");
+
+    // 2. Clear UI Inputs
     m_usernameInput->clear();
     m_passwordInput->clear();
+
+    // 3. Clear Data structures
+    m_chats.clear();
+    m_users.clear();
+    m_currentChatId.clear();
+    m_isLoadingHistory = false;
+
+    // 4. Clear UI Lists
+    m_chatListWidget->clear();
+    m_contactListWidget->clear();
+    m_chatList->clear();
+    m_chatTitle->setText("Select a chat");
+
+    // 5. Reset Client Connection (Close and Reconnect)
+    m_loginBtn->setEnabled(false); // Disable login until reconnected
+    m_statusLabel->setText("Resetting connection...");
+
+    m_client->logout(); // Close socket and clear token
+
+    // 6. Switch View
     m_stackedWidget->setCurrentWidget(m_loginPage);
+
+    // 7. Reconnect after short delay to ensure clean state
+    QTimer::singleShot(500, m_client, &WebSocketClient::connectToServer);
 }
 
 void MainWindow::onConnected() {
