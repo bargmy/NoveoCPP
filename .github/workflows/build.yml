@@ -75,7 +75,7 @@ jobs:
           fi
 
   # =========================================================
-  # WINDOWS BUILD (Fixed: Manual DLL & Plugin Copy)
+  # WINDOWS BUILD (Working: Manual Copy)
   # =========================================================
   build-windows:
     needs: prepare
@@ -131,22 +131,17 @@ jobs:
           cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
           cmake --build . 
 
-          # 3. MANUAL DEPLOYMENT (Robust against windeployqt failure)
+          # 3. MANUAL DEPLOYMENT
           echo "Executing manual DLL deployment..."
-          
-          # Copy Qt Modules
           cp "$QT_ROOT/bin/Qt5Core.dll" .
           cp "$QT_ROOT/bin/Qt5Gui.dll" .
           cp "$QT_ROOT/bin/Qt5Widgets.dll" .
           cp "$QT_ROOT/bin/Qt5Network.dll" .
           cp "$QT_ROOT/bin/Qt5WebSockets.dll" .
-          
-          # Copy MinGW Runtime
           cp "$MINGW_BIN/libgcc_s_seh-1.dll" .
           cp "$MINGW_BIN/libstdc++-6.dll" .
           cp "$MINGW_BIN/libwinpthread-1.dll" .
 
-          # Copy Platform Plugin (CRITICAL FIX)
           mkdir -p platforms
           cp "$QT_ROOT/plugins/platforms/qwindows.dll" platforms/
           
@@ -169,7 +164,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # =========================================================
-  # LINUX BUILD (Fixed: Removed Icon Requirement)
+  # LINUX BUILD (Fixed: Guaranteed Icon Existence)
   # =========================================================
   build-linux:
     needs: prepare
@@ -193,7 +188,7 @@ jobs:
       - name: Install Deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libgl1-mesa-dev cmake wget file
+          sudo apt-get install -y build-essential libgl1-mesa-dev cmake wget file imagemagick
 
       - name: Build and Bundle
         env:
@@ -212,16 +207,31 @@ jobs:
           # Prepare AppDir
           mkdir -p AppDir/usr/bin
           mkdir -p AppDir/usr/share/applications
-          # mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps/  <-- SKIP ICON DIRS
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps/
           
           cp NoveoDesktop AppDir/usr/bin/
 
-          # Create Desktop File (SKIP ICON entry to prevent linuxdeployqt crash)
+          # 1. GENERATE DUMMY ICON FIRST (Prevents failure if no icon found)
+          echo "Generating fallback icon..."
+          convert -size 256x256 xc:blue AppDir/usr/share/icons/hicolor/256x256/apps/noveodesktop.png
+
+          # 2. OVERWRITE WITH REAL ICON IF EXISTS
+          if [ -f "../icon.ico" ]; then
+            echo "Found icon.ico, converting..."
+            convert "../icon.ico" -resize 256x256 AppDir/usr/share/icons/hicolor/256x256/apps/noveodesktop.png
+          elif [ -f "../icon.png" ]; then
+            echo "Found icon.png, copying..."
+            cp "../icon.png" AppDir/usr/share/icons/hicolor/256x256/apps/noveodesktop.png
+          fi
+
+          # 3. Create Desktop File with Valid Icon Entry
+          # NOTE: Icon name must match the filename without extension (noveodesktop)
           cat > AppDir/usr/share/applications/NoveoDesktop.desktop <<EOF
           [Desktop Entry]
           Type=Application
           Name=NoveoDesktop
           Exec=NoveoDesktop
+          Icon=noveodesktop
           Categories=Utility;
           EOF
           
@@ -247,7 +257,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # =========================================================
-  # MACOS BUILD (Fixed CMake Config)
+  # MACOS BUILD (Working: No Config Flag)
   # =========================================================
   build-macos:
     needs: prepare
@@ -279,22 +289,18 @@ jobs:
           mkdir -p build
           cd build
           
-          # Fix arm64 linking error -> Force x86_64
           cmake .. -DCMAKE_BUILD_TYPE=Release \
                    -DCMAKE_PREFIX_PATH="${Qt5_Dir}" \
                    -DCMAKE_OSX_ARCHITECTURES=x86_64
 
-          # Removed "--config Release"
           cmake --build . 
 
-          # Manual .app structure
           APP_NAME="NoveoDesktop.app"
           mkdir -p "$APP_NAME/Contents/MacOS"
           mkdir -p "$APP_NAME/Contents/Resources"
           
           cp NoveoDesktop "$APP_NAME/Contents/MacOS/"
           
-          # Optional: Copy icon if exists
           if [ -f "../icon.icns" ]; then
              cp "../icon.icns" "$APP_NAME/Contents/Resources/"
           fi
@@ -318,7 +324,6 @@ jobs:
           </plist>
           EOF
 
-          # Bundle libs
           macdeployqt "$APP_NAME" -dmg -verbose=1
 
           DMG_FILE=$(ls *.dmg 2>/dev/null | head -n 1 || true)
