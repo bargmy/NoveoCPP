@@ -3,8 +3,8 @@
 
 #include <QObject>
 #include <QWebSocket>
-#include <QJsonObject>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QJsonArray>
 #include "DataStructures.h"
 
@@ -13,10 +13,14 @@ class WebSocketClient : public QObject
     Q_OBJECT
 public:
     explicit WebSocketClient(QObject *parent = nullptr);
+
     void connectToServer();
     void login(const QString &username, const QString &password);
     void sendMessage(const QString &chatId, const QString &text, const QString &replyToId = QString());
     
+    // NEW: Function to request older messages
+    void fetchHistory(const QString &chatId, qint64 beforeTimestamp);
+
     bool isConnected() const;
     QString currentUserId() const { return m_currentUser.userId; }
 
@@ -40,7 +44,7 @@ private:
     QWebSocket m_webSocket;
     User m_currentUser;
     QString m_token;
-    
+
     void handleLoginSuccess(const QJsonObject &data);
     void handleChatHistory(const QJsonObject &data);
     void handleMessage(const QJsonObject &data);
