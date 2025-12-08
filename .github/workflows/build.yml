@@ -31,10 +31,11 @@ jobs:
         run: |
           set -e
           echo "event: $GITHUB_EVENT_NAME"
+
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
             echo "Manual dispatch -> bumping patch version and creating tag."
-
             latest=$(git tag -l "v*" --sort=-v:refname | head -n 1)
+
             if [ -z "$latest" ]; then
               new="v1.0.0"
             else
@@ -43,9 +44,25 @@ jobs:
               rest=${base#*.}
               minor=${rest%%.*}
               patch=${rest##*.}
+
+              # Increment patch
               patch=$((patch + 1))
+
+              # Check if patch > 15 -> Reset patch, increment minor
+              if [ "$patch" -gt 15 ]; then
+                patch=0
+                minor=$((minor + 1))
+              fi
+
+              # Check if minor > 99 -> Reset minor, increment major
+              if [ "$minor" -gt 99 ]; then
+                minor=0
+                major=$((major + 1))
+              fi
+
               new="v$major.$minor.$patch"
             fi
+
             echo "New tag will be: $new"
 
             # Choose auth token
@@ -68,7 +85,7 @@ jobs:
 
             echo "new_version=$new" >> $GITHUB_OUTPUT
           else
-            # release event -> use tag from the event (GITHUB_REF = refs/tags/<tag>)
+            # release event -> use tag from the event (GITHUB_REF = refs/tags/)
             refname=${GITHUB_REF##*/}
             echo "Release event detected, using tag: $refname"
             echo "new_version=$refname" >> $GITHUB_OUTPUT
@@ -104,6 +121,7 @@ jobs:
           set -e
           echo "Qt5_Dir = ${Qt5_Dir}"
           echo "IQTA_TOOLS = ${IQTA_TOOLS}"
+
           export QT_ROOT="${Qt5_Dir}"
           export MINGW_BIN="${IQTA_TOOLS}/mingw810_64/bin"
           export PATH="$MINGW_BIN:$QT_ROOT/bin:$PATH"
@@ -114,6 +132,7 @@ jobs:
 
           echo "Configuring project..."
           cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+
           echo "Building..."
           cmake --build . --config Release
 
@@ -123,20 +142,18 @@ jobs:
 
           # --- FIX: DOWNLOAD INDIVIDUAL OPENSSL DLLs FROM YOUR SERVER ---
           echo "Downloading OpenSSL DLLs from hienob.bargmy.ir..."
-          
+
           # Download libssl
           curl -L -o libssl-1_1-x64.dll http://hienob.bargmy.ir/openssl/libssl-1_1-x64.dll
-          
           # Download libcrypto
           curl -L -o libcrypto-1_1-x64.dll http://hienob.bargmy.ir/openssl/libcrypto-1_1-x64.dll
-          
+
           # Verify files exist and have size > 0
           if [ ! -s "libssl-1_1-x64.dll" ] || [ ! -s "libcrypto-1_1-x64.dll" ]; then
-             echo "ERROR: OpenSSL DLLs failed to download (empty or missing)."
-             ls -l *.dll
-             exit 1
+            echo "ERROR: OpenSSL DLLs failed to download (empty or missing)."
+            ls -l *.dll
+            exit 1
           fi
-          
           echo "OpenSSL Download Successful."
           # --- FIX END ---
 
@@ -171,8 +188,8 @@ jobs:
 
           VERSION=${{ needs.prepare.outputs.new_version }}
           ZIP_NAME="NoveoDesktop-${VERSION}.zip"
-
           echo "Creating ZIP: $ZIP_NAME"
+
           # 7z is available on Windows runner images
           7z a "$ZIP_NAME" * -xr!*.obj -xr!*.cpp -xr!*.h -xr!Makefile -xr!CMakeFiles -xr!*_autogen
 
