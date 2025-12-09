@@ -4,6 +4,8 @@
 #include <QStyledItemDelegate>
 #include <QPainter>
 #include <QRegularExpression>
+#include <QIcon>
+#include <QApplication>
 
 class UserListDelegate : public QStyledItemDelegate {
     Q_OBJECT
@@ -13,15 +15,14 @@ public:
     void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override {
         painter->save();
 
-        // 1. Draw Background (handles hover/selection automatically)
+        // 1. Draw Background
         QStyleOptionViewItem opt = option;
         initStyleOption(&opt, index);
         option.widget->style()->drawPrimitive(QStyle::PE_PanelItemViewItem, &opt, painter, option.widget);
 
         // 2. Extract Data
         QString fullText = index.data(Qt::DisplayRole).toString();
-        QIcon icon = qvariant_cast<QIcon>(index.data(Qt::DecorationRole));
-        
+        QIcon icon = qvariant_cast<QIcon>(index.data(Qt::DecorationRole)); // FIXED casting
         QRect rect = opt.rect;
         const int padding = 10;
         const int iconSize = 40;
@@ -33,7 +34,8 @@ public:
         }
 
         // 4. Parse Nametag: Name [#color, "Tag"]
-        static QRegularExpression regex(R"(^(.*)\s\[#([a-fA-F0-9]{6}),\s*"(.*)"\]$)");
+        // FIXED: Using standard escaping instead of raw string R"()" to prevent compiler errors
+        static QRegularExpression regex("^(.*)\\s\\[#([a-fA-F0-9]{6}),\\s*\"(.*)\"\\]$");
         QRegularExpressionMatch match = regex.match(fullText);
 
         QString name;
@@ -51,16 +53,13 @@ public:
         }
 
         // 5. Draw Name
-        // Determine text color based on selection state or theme
         QColor textColor = (opt.state & QStyle::State_Selected) ? Qt::white : opt.palette.text().color();
         painter->setPen(textColor);
-
         QFont nameFont = opt.font;
         nameFont.setPixelSize(14);
         painter->setFont(nameFont);
 
         int textX = rect.left() + padding + iconSize + padding;
-        
         QFontMetrics fm(nameFont);
         int nameWidth = fm.horizontalAdvance(name);
         QRect nameRect(textX, rect.top(), nameWidth, rect.height());
@@ -72,7 +71,7 @@ public:
             int tagX = textX + nameWidth + 8;
             int tagH = 18;
             int tagY = rect.center().y() - tagH / 2;
-            
+
             QFont tagFont = nameFont;
             tagFont.setPixelSize(10);
             tagFont.setBold(true);
@@ -85,7 +84,7 @@ public:
             painter->drawRoundedRect(tagX, tagY, tagW, tagH, 4, 4);
 
             // Tag Text
-            painter->setPen(Qt::white); 
+            painter->setPen(Qt::white);
             painter->setFont(tagFont);
             painter->drawText(QRect(tagX, tagY, tagW, tagH), Qt::AlignCenter, tagText);
         }
@@ -94,7 +93,8 @@ public:
     }
 
     QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override {
-        return QSize(option.rect.width(), 60); // Enforce consistent item height
+        Q_UNUSED(index);
+        return QSize(option.rect.width(), 60); 
     }
 };
 
