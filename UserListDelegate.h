@@ -22,7 +22,8 @@ public:
 
         // 2. Extract Data
         QString fullText = index.data(Qt::DisplayRole).toString();
-        QIcon icon = qvariant_cast<QIcon>(index.data(Qt::DecorationRole)); // FIXED casting
+        // FIXED: Added template type <QIcon> to fix casting error
+        QIcon icon = qvariant_cast<QIcon>(index.data(Qt::DecorationRole));
         QRect rect = opt.rect;
         const int padding = 10;
         const int iconSize = 40;
@@ -34,7 +35,7 @@ public:
         }
 
         // 4. Parse Nametag: Name [#color, "Tag"]
-        // FIXED: Using standard escaping instead of raw string R"()" to prevent compiler errors
+        // FIXED: Replaced raw string literal R"()" with standard string to fix compiler error
         static QRegularExpression regex("^(.*)\\s\\[#([a-fA-F0-9]{6}),\\s*\"(.*)\"\\]$");
         QRegularExpressionMatch match = regex.match(fullText);
 
