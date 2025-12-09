@@ -14,9 +14,9 @@
 #include <QCryptographicHash>
 #include <QFile>
 #include <QPainterPath>
-#include <QTextDocument> // FIXED: Added missing include
-#include <QCheckBox>     // FIXED: Added missing include
-#include <QApplication>  // FIXED: Added missing include
+#include <QTextDocument> 
+#include <QCheckBox>     
+#include <QApplication>  
 
 // Custom role to store the avatar URL in items for updating later
 const int AvatarUrlRole = Qt::UserRole + 10;
@@ -25,7 +25,6 @@ const QString API_BASE_URL = "https://api.pcpapc172.ir:8443";
 // ==========================================
 // 2. MESSAGE DELEGATE (Chat Area)
 // ==========================================
-// Removed Q_OBJECT to avoid moc issues in .cpp file
 class MessageDelegate : public QStyledItemDelegate {
     bool m_isDarkMode = false;
 public:
@@ -75,7 +74,7 @@ public:
             totalNameWidth = nameTextW + (hasTag ? (tagW + 8) : 0);
         }
 
-        QTextDocument doc; // This now works because of <QTextDocument> include
+        QTextDocument doc;
         doc.setDefaultFont(QFont("Segoe UI", 10));
         doc.setPlainText(text);
         doc.setTextWidth(maxBubbleWidth - 20);
@@ -116,7 +115,7 @@ public:
         QString sender = index.data(Qt::UserRole + 2).toString();
         qint64 timestamp = index.data(Qt::UserRole + 3).toLongLong();
         bool isMe = index.data(Qt::UserRole + 4).toBool();
-        // FIXED: Added template argument <QIcon>
+        
         QIcon avatar = qvariant_cast<QIcon>(index.data(Qt::DecorationRole));
 
         QRect bubbleRect, textRect, nameRect, avatarRect;
@@ -342,7 +341,7 @@ void MainWindow::setupUi() {
     // Settings
     m_settingsTab = new QWidget();
     QVBoxLayout *settingsLayout = new QVBoxLayout(m_settingsTab);
-    QCheckBox *darkModeCheck = new QCheckBox("Dark Mode"); // Works now with include
+    QCheckBox *darkModeCheck = new QCheckBox("Dark Mode");
     darkModeCheck->setChecked(m_isDarkMode);
     connect(darkModeCheck, &QCheckBox::toggled, this, &MainWindow::onDarkModeToggled);
 
@@ -420,8 +419,6 @@ void MainWindow::setupUi() {
     connect(m_sendBtn, &QPushButton::clicked, this, &MainWindow::onSendBtnClicked);
     connect(m_messageInput, &QLineEdit::returnPressed, this, &MainWindow::onSendBtnClicked);
 }
-
-// ... (Keep existing login/connection handlers) ...
 
 void MainWindow::onConnected() {
     m_statusLabel->setText("Connected. Please log in.");
@@ -790,7 +787,6 @@ QColor MainWindow::getColorForName(const QString &name) {
 }
 
 void MainWindow::applyTheme() {
-    // FIXED: Removed qApp dependency by using QApplication::instance() or just qApp macro (which works with #include <QApplication>)
     if (m_isDarkMode) {
         qApp->setStyleSheet(
             "QMainWindow { background-color: #1e1e1e; }"
@@ -805,7 +801,6 @@ void MainWindow::applyTheme() {
             "QTabBar::tab { background: #2d2d2d; color: #ccc; padding: 8px 20px; }"
             "QTabBar::tab:selected { background: #3d3d3d; color: white; }"
         );
-        // FIXED: Use dynamic_cast instead of qobject_cast since we removed Q_OBJECT from the internal class
         MessageDelegate* d = dynamic_cast<MessageDelegate*>(m_chatList->itemDelegate());
         if(d) d->setTheme(true);
     } else {
@@ -842,7 +837,8 @@ void MainWindow::onLogoutClicked() {
     settings.remove("username");
     settings.remove("password");
     m_stackedWidget->setCurrentWidget(m_loginPage);
-    // FIXED: Removed unknown method 'disconnectFromServer'. Reconnecting will reset state anyway.
+    
+    // Reconnect to reset state (removed invalid disconnectFromServer call)
     m_client->connectToServer();
 }
 
