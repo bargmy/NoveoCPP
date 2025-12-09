@@ -3,14 +3,24 @@
 
 #include <QMainWindow>
 #include <QListWidget>
+#include <QStackedWidget>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QLabel>
-#include <QStackedWidget>
-#include <QMap>
-#include <QSet>
+#include <QTabWidget>
+#include <QHBoxLayout>
+#include <QVBoxLayout>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
+#include <QSettings>
+#include <QTimer>
+#include <QMap>
+#include <QSet>
+#include <QIcon>
+#include <QPainter>
+#include <QPainterPath>
+#include <QScrollBar>
+
 #include "WebSocketClient.h"
 #include "DataStructures.h"
 
@@ -35,13 +45,10 @@ private slots:
     void onUserListUpdated(const std::vector<User> &users);
     void onSendBtnClicked();
     void onNewChatCreated(const Chat &chat);
-
     void onChatSelected(QListWidgetItem *item);
     void onContactSelected(QListWidgetItem *item);
     void onDarkModeToggled(bool checked);
     void onLogoutClicked();
-    
-    // NEW: Slot for scroll detection
     void onScrollValueChanged(int value);
 
 private:
@@ -49,18 +56,21 @@ private:
     void applyTheme();
     void renderMessages(const QString &chatId);
     void addMessageBubble(const Message &msg, bool appendStretch, bool animate);
-    
-    // NEW: Prepend function for older messages
     void prependMessageBubble(const Message &msg);
-    
     QString resolveChatName(const Chat &chat);
     QColor getColorForName(const QString &name);
-    
-    // Avatar handling
+
+    // --- Avatar Handling ---
     QIcon getAvatar(const QString &name, const QString &url);
     QIcon generateGenericAvatar(const QString &name);
     void updateAvatarOnItems(const QString &url, const QPixmap &pixmap);
+    
+    // Cache Helpers
+    QString getCachePath(const QString &url) const;
+    void saveToCache(const QString &url, const QByteArray &data);
+    void downloadAvatar(const QString &url);
 
+    // Scroll Helpers
     void scrollToBottom();
     void smoothScrollToBottom();
     bool isScrolledToBottom() const;
@@ -72,18 +82,20 @@ private:
     QStackedWidget *m_stackedWidget;
     QWidget *m_loginPage;
     QWidget *m_appPage;
+
     QLineEdit *m_usernameInput;
     QLineEdit *m_passwordInput;
     QPushButton *m_loginBtn;
     QLabel *m_statusLabel;
 
-    QListWidget *m_chatListWidget;
-    QListWidget *m_contactListWidget;
+    QListWidget *m_chatListWidget;    // Sidebar Chats
+    QListWidget *m_contactListWidget; // Sidebar Contacts
     QTabWidget *m_sidebarTabs;
     QWidget *m_settingsTab;
+
     QWidget *m_chatAreaWidget;
     QLabel *m_chatTitle;
-    QListWidget *m_chatList; // The main chat area
+    QListWidget *m_chatList;          // Message Area
     QLineEdit *m_messageInput;
     QPushButton *m_sendBtn;
 
@@ -92,13 +104,12 @@ private:
     QMap<QString, Chat> m_chats;
     QString m_currentChatId;
     bool m_isDarkMode;
-    
-    // NEW: Flag to prevent spamming history requests
     bool m_isLoadingHistory = false;
 
-    // Avatar Cache
-    QMap<QString, QPixmap> m_avatarCache;
-    QSet<QString> m_pendingDownloads;
+    // Avatar Cache System
+    QMap<QString, QPixmap> m_avatarCache; // Memory Cache
+    QSet<QString> m_pendingDownloads;     // URLs currently downloading
+    QSet<QString> m_checkedUrls;          // URLs checked for updates this session
 };
 
 #endif // MAINWINDOW_H
