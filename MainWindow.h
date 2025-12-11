@@ -2,6 +2,11 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include <QIcon>
+#include <QStyleOptionViewItem>
+#include <QModelIndex>
+#include <QPainter>
+#include <QStyledItemDelegate>
 #include <QListWidget>
 #include <QLineEdit>
 #include <QPushButton>
