@@ -40,7 +40,7 @@ void WebSocketClient::login(const QString &username, const QString &password) {
     m_webSocket.sendTextMessage(QString::fromUtf8(doc.toJson(QJsonDocument::Compact)));
 }
 
-void WebSocketClient::sendMessage(const QString &chatId, const QString &text, const QString &replyToId) {
+void WebSocketClient::sendMessage(const QString& chatId, const QString& text, const QString& replyToId) {
     if (!isConnected()) return;
 
     QJsonObject content;
@@ -50,11 +50,31 @@ void WebSocketClient::sendMessage(const QString &chatId, const QString &text, co
 
     QJsonObject payload;
     payload["type"] = "message";
-    payload["chatId"] = chatId;
+
+    // NEW: Check if this is a new contact chat (format: user1_user2)
+    if (chatId.contains("_") && !chatId.startsWith("temp")) {
+        QStringList ids = chatId.split("_");
+        if (ids.size() == 2) {
+            // Extract the OTHER user's ID
+            QString recipientId = (ids[0] == m_currentUser.userId) ? ids[1] : ids[0];
+            payload["recipientId"] = recipientId;  // Server will create chat!
+        }
+        else {
+            payload["chatId"] = chatId;
+        }
+    }
+    else {
+        payload["chatId"] = chatId;  // For existing chats
+    }
+
     payload["content"] = content;
-    
-    if (!replyToId.isEmpty()) payload["replyToId"] = replyToId;
-    else payload["replyToId"] = QJsonValue::Null;
+
+    if (!replyToId.isEmpty()) {
+        payload["replyToId"] = replyToId;
+    }
+    else {
+        payload["replyToId"] = QJsonValue::Null;
+    }
 
     QJsonDocument doc(payload);
     m_webSocket.sendTextMessage(QString::fromUtf8(doc.toJson(QJsonDocument::Compact)));
