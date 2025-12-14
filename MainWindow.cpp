@@ -1,4 +1,4 @@
-#include "MainWindow.h"
+﻿#include "MainWindow.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -21,6 +21,9 @@
 #include <QSet>
 #include <QNetworkRequest>
 #include <QPainterPath>
+#include <QStandardPaths>
+#include <QDir>
+#include <QCryptographicHash>
 
 // Custom role to store the avatar URL in items for updating later
 const int AvatarUrlRole = Qt::UserRole + 10;
@@ -620,30 +623,39 @@ void MainWindow::onAuthFailed(const QString& msg) {
 void MainWindow::onUserListUpdated(const std::vector<User>& users) {
     m_users.clear();
     m_contactListWidget->clear();
+
     for (const auto& u : users) {
         m_users.insert(u.userId, u);
         if (u.userId == m_client->currentUserId()) continue;
+
         QListWidgetItem* item = new QListWidgetItem(m_contactListWidget);
         item->setText(u.username);
         item->setData(Qt::UserRole, u.userId);
 
-        QString url = u.avatarUrl;
-        if (url.startsWith("/")) url = API_BASE_URL + url;
-        item->setData(AvatarUrlRole, url);
-        item->setIcon(getAvatar(u.username, u.avatarUrl));
+        QString fullUrl = u.avatarUrl;
+        if (!fullUrl.startsWith("http")) {
+            fullUrl = API_BASE_URL + fullUrl;
+        }
+
+        item->setData(AvatarUrlRole, fullUrl);
+        item->setIcon(getAvatar(u.username, fullUrl));  //  Pass fullUrl!
     }
 
     for (int i = 0; i < m_chatListWidget->count(); i++) {
         QListWidgetItem* item = m_chatListWidget->item(i);
         QString chatId = item->data(Qt::UserRole).toString();
+
         if (m_chats.contains(chatId)) {
             QString name = resolveChatName(m_chats[chatId]);
-            QString url = m_chats[chatId].avatarUrl;
-            if (url.startsWith("/")) url = API_BASE_URL + url;
+
+            QString fullUrl = m_chats[chatId].avatarUrl;
+            if (!fullUrl.startsWith("http")) {
+                fullUrl = API_BASE_URL + fullUrl;
+            }
 
             item->setText(name);
-            item->setData(AvatarUrlRole, url);
-            item->setIcon(getAvatar(name, m_chats[chatId].avatarUrl));
+            item->setData(AvatarUrlRole, fullUrl);
+            item->setIcon(getAvatar(name, fullUrl));  // Pass fullUrl, NOT m_chats[chatId].avatarUrl!
         }
     }
 }
@@ -704,13 +716,24 @@ void MainWindow::onChatHistoryReceived(const std::vector<Chat>& incomingChats) {
         for (const auto& chat : sortedChats) {
             QListWidgetItem* item = new QListWidgetItem(m_chatListWidget);
             QString name = resolveChatName(chat);
+
+            // For private chats, get avatar from the other user
             QString url = chat.avatarUrl;
+            if (chat.chatType == "private" && url.isEmpty()) {
+                for (const auto& memberId : chat.members) {
+                    if (memberId != m_client->currentUserId() && m_users.contains(memberId)) {
+                        url = m_users[memberId].avatarUrl;
+                        break;
+                    }
+                }
+            }
+
             if (url.startsWith("/")) url = API_BASE_URL + url;
 
             item->setText(name);
             item->setData(Qt::UserRole, chat.chatId);
             item->setData(AvatarUrlRole, url);
-            item->setIcon(getAvatar(name, chat.avatarUrl));
+            item->setIcon(getAvatar(name, url));
             m_chatListWidget->addItem(item);
         }
     }
@@ -721,13 +744,24 @@ void MainWindow::onNewChatCreated(const Chat& chat) {
         m_chats.insert(chat.chatId, chat);
         QListWidgetItem* item = new QListWidgetItem(m_chatListWidget);
         QString name = resolveChatName(chat);
+
+        // For private chats, get avatar from the other user
         QString url = chat.avatarUrl;
+        if (chat.chatType == "private" && url.isEmpty()) {
+            for (const auto& memberId : chat.members) {
+                if (memberId != m_client->currentUserId() && m_users.contains(memberId)) {
+                    url = m_users[memberId].avatarUrl;
+                    break;
+                }
+            }
+        }
+
         if (url.startsWith("/")) url = API_BASE_URL + url;
 
         item->setText(name);
         item->setData(Qt::UserRole, chat.chatId);
         item->setData(AvatarUrlRole, url);
-        item->setIcon(getAvatar(name, chat.avatarUrl));
+        item->setIcon(getAvatar(name, url));
         m_chatListWidget->insertItem(0, item);
     }
 }
@@ -777,34 +811,77 @@ QIcon MainWindow::generateGenericAvatar(const QString& name) {
 }
 
 QIcon MainWindow::getAvatar(const QString& name, const QString& urlIn) {
-    if (urlIn.isEmpty() || urlIn.contains("default.png")) {
+    // Debug: Log incoming URL
+    qDebug() << "[Avatar] Processing:" << name << "URL:" << urlIn;
+
+    // Only use generic avatar if URL is truly empty or explicitly a default placeholder
+    if (urlIn.isEmpty() || urlIn == "default.png" || urlIn == "/default.png" || urlIn.endsWith("/default.png")) {
+        qDebug() << "[Avatar] Using generic avatar for" << name;
         return generateGenericAvatar(name);
     }
 
-    // Convert to full URL
+    // Convert to full URL (matching HTML's resolveServerUrl logic)
     QString fullUrl = urlIn;
     if (fullUrl.startsWith("/")) {
         fullUrl = API_BASE_URL + fullUrl;
     }
+    // Handle case where URL doesn't start with http
+    else if (!fullUrl.startsWith("http://") && !fullUrl.startsWith("https://")) {
+        fullUrl = API_BASE_URL + "/" + fullUrl;
+    }
 
-    // Check cache with FULL URL
+    qDebug() << "[Avatar] Full URL:" << fullUrl;
+
+    // Check memory cache first with FULL URL
     if (m_avatarCache.contains(fullUrl)) {
+        qDebug() << "[Avatar] Memory cache hit for" << fullUrl;
         return QIcon(m_avatarCache[fullUrl]);
     }
 
+    // Check disk cache
+    QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/avatars";
+    QDir().mkpath(cacheDir);  // Ensure directory exists
+
+    QString urlHash = QString(QCryptographicHash::hash(fullUrl.toUtf8(), QCryptographicHash::Md5).toHex());
+    QString cachedFilePath = cacheDir + "/" + urlHash + ".png";
+
+    if (QFile::exists(cachedFilePath)) {
+        qDebug() << "[Avatar] Disk cache hit for" << fullUrl;
+        QPixmap pixmap;
+        if (pixmap.load(cachedFilePath)) {
+            m_avatarCache.insert(fullUrl, pixmap);  // Also cache in memory
+            return QIcon(pixmap);
+        }
+    }
+
+
     // Download with FULL URL
     if (!m_pendingDownloads.contains(fullUrl)) {
+        qDebug() << "[Avatar] Starting download for" << fullUrl;
         m_pendingDownloads.insert(fullUrl);
-        QUrl qurl(fullUrl);  // Create QUrl first
-        QNetworkRequest request(qurl);  // Then pass to QNetworkRequest
+        QUrl qurl(fullUrl);
+        QNetworkRequest request(qurl);
+        // Add browser-like User-Agent to avoid server blocking/throttling
+        request.setRawHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+        // Increase timeout significantly for large files (60 seconds for transfer)
+        request.setTransferTimeout(60000); // 60 seconds timeout for transfer
         QNetworkReply* reply = m_nam->get(request);
 
-        connect(reply, &QNetworkReply::finished, this, [this, reply, fullUrl]() {
+        // Track download progress
+        connect(reply, &QNetworkReply::downloadProgress, this, [fullUrl](qint64 bytesReceived, qint64 bytesTotal) {
+            if (bytesTotal > 0) {
+                qDebug() << "[Avatar] Progress for" << fullUrl << ":" << bytesReceived << "/" << bytesTotal
+                    << "(" << (bytesReceived * 100 / bytesTotal) << "%)";
+            }
+            });
+
+        connect(reply, &QNetworkReply::finished, this, [this, reply, fullUrl, name]() {
             reply->deleteLater();
-            m_pendingDownloads.remove(fullUrl);
+            m_pendingDownloads.remove(fullUrl); // Always remove from pending, even on error
 
             if (reply->error() == QNetworkReply::NoError) {
                 QByteArray data = reply->readAll();
+                qDebug() << "[Avatar] Downloaded" << data.size() << "bytes for" << fullUrl;
                 QPixmap pixmap;
                 if (pixmap.loadFromData(data)) {
                     QPixmap circular(42, 42);
@@ -814,15 +891,44 @@ QIcon MainWindow::getAvatar(const QString& name, const QString& urlIn) {
                     QPainterPath path;
                     path.addEllipse(0, 0, 42, 42);
                     p.setClipPath(path);
-                    p.drawPixmap(0, 0, 42, 42, pixmap.scaled(42, 42, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
 
-                    // Cache with FULL URL
+                    // Center crop: take the center square of the image
+                    int sourceSize = qMin(pixmap.width(), pixmap.height());
+                    int x = (pixmap.width() - sourceSize) / 2;
+                    int y = (pixmap.height() - sourceSize) / 2;
+                    QPixmap cropped = pixmap.copy(x, y, sourceSize, sourceSize);
+
+                    // Scale the cropped square to fit
+                    p.drawPixmap(0, 0, 42, 42, cropped.scaled(42, 42, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+
+                    // Cache in memory with FULL URL
                     m_avatarCache.insert(fullUrl, circular);
+
+                    // Save to disk cache
+                    QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/avatars";
+                    QString urlHash = QString(QCryptographicHash::hash(fullUrl.toUtf8(), QCryptographicHash::Md5).toHex());
+                    QString cachedFilePath = cacheDir + "/" + urlHash + ".png";
+                    circular.save(cachedFilePath, "PNG");
+
+                    qDebug() << "[Avatar] Cached to memory and disk for" << fullUrl;
                     // Update items with matching FULL URL
                     updateAvatarOnItems(fullUrl, circular);
                 }
+                else {
+                    qDebug() << "[Avatar] Failed to load image data for" << fullUrl;
+                }
+            }
+            else {
+                // On download failure, log the error for debugging
+                qDebug() << "[Avatar] Failed to download from" << fullUrl;
+                qDebug() << "[Avatar] Error code:" << reply->error();
+                qDebug() << "[Avatar] Error string:" << reply->errorString();
+                qDebug() << "[Avatar] HTTP status:" << reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
             }
             });
+    }
+    else {
+        qDebug() << "[Avatar] Download already pending for" << fullUrl;
     }
 
     // Return generic avatar while downloading
@@ -832,24 +938,23 @@ QIcon MainWindow::getAvatar(const QString& name, const QString& urlIn) {
 void MainWindow::updateAvatarOnItems(const QString& url, const QPixmap& pixmap) {
     QIcon icon(pixmap);
 
-    qDebug() << "updateAvatarOnItems called with URL:" << url;
-
-    auto updateList = [&](QListWidget* list, const QString& listName) {
-        qDebug() << "Checking" << listName << "- item count:" << list->count();
-        for (int i = 0; i < list->count(); ++i) {
+    auto updateList = [&](QListWidget* list) {
+        bool updated = false;
+        for (int i = 0; i < list->count(); i++) {
             QListWidgetItem* item = list->item(i);
-            QString itemUrl = item->data(AvatarUrlRole).toString();
-            qDebug() << "  Item" << i << "URL:" << itemUrl;
-            if (itemUrl == url) {
-                qDebug() << "  -> MATCH! Updating item" << i;
+            if (item && item->data(AvatarUrlRole).toString() == url) {
                 item->setIcon(icon);
+                updated = true;
             }
+        }
+        if (updated) {
+            list->viewport()->update();
         }
         };
 
-    updateList(m_chatListWidget, "m_chatListWidget");
-    updateList(m_contactListWidget, "m_contactListWidget");
-    updateList(m_chatList, "m_chatList");
+    updateList(m_chatListWidget);
+    updateList(m_contactListWidget);
+    updateList(m_chatList);
 }
 
 void MainWindow::scrollToBottom() {
@@ -981,6 +1086,7 @@ void MainWindow::prependMessageBubble(const Message& msg) {
 void MainWindow::onMessageReceived(const Message& msg) {
     if (m_chats.contains(msg.chatId)) {
         m_chats[msg.chatId].messages.push_back(msg);
+        // Move chat to top in sidebar
         for (int i = 0; i < m_chatListWidget->count(); i++) {
             if (m_chatListWidget->item(i)->data(Qt::UserRole).toString() == msg.chatId) {
                 QListWidgetItem* item = m_chatListWidget->takeItem(i);
@@ -990,6 +1096,7 @@ void MainWindow::onMessageReceived(const Message& msg) {
         }
     }
 
+    // ALWAYS display the message if it's for the current chat
     if (m_currentChatId == msg.chatId) {
         bool wasAtBottom = isScrolledToBottom();
         addMessageBubble(msg, false, false);
