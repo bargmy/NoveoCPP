@@ -319,32 +319,60 @@ public:
             int statusInt = index.data(Qt::UserRole + 5).toInt();
             MessageStatus status = static_cast<MessageStatus>(statusInt);
 
-            QFont statusFont = option.font;
-            statusFont.setPixelSize(9);
-            statusFont.setBold(true);
+            // Use smaller font size for status icons
+            QFont statusFont("Segoe UI", 9);  // Reduced from 11 to 9
             painter->setFont(statusFont);
+            QFontMetrics fm(statusFont);
+
+            // Use QChar Unicode constructors to avoid source file encoding issues
+            QString checkmark = QString(QChar(0x2713));  // ✓ CHECK MARK
+            QString circle = QString(QChar(0x25CB));     // ○ WHITE CIRCLE
+
+            // Test if checkmark renders
+            bool hasCheckmark = fm.horizontalAdvance(checkmark) > 0;
 
             QString statusIcon;
             QColor statusColor = timeColor;
+            int iconX = 0;
 
             if (status == MessageStatus::Pending) {
-                statusIcon = "..";  // Two dots for pending
+                statusIcon = circle;  // Circle
                 statusColor = QColor("#999999");
             }
             else if (status == MessageStatus::Sent) {
-                statusIcon = "v";  // Single v for sent
+                statusIcon = hasCheckmark ? checkmark : "v";  // Checkmark or v
                 statusColor = QColor("#999999");
             }
             else if (status == MessageStatus::Seen) {
-                statusIcon = "vv";  // Double v for seen
-                statusColor = m_isDarkMode ? QColor("#93C5FD") : QColor("#60A5FA");
+                // For double checkmark, draw them overlapping manually
+                if (hasCheckmark) {
+                    painter->setPen(m_isDarkMode ? QColor("#93C5FD") : QColor("#60A5FA"));
+
+                    // Calculate position for double checkmark
+                    int singleWidth = fm.horizontalAdvance(checkmark);
+                    int overlapOffset = singleWidth / 2;  // Overlap by 50%
+
+                    // Draw first checkmark
+                    iconX = bubbleRect.right() - 8 - timeWidth - 4 - singleWidth - overlapOffset;
+                    int iconY = bubbleRect.bottom() - 5 - timeFm.height();
+                    painter->drawText(iconX, iconY + fm.ascent(), checkmark);
+
+                    // Draw second checkmark overlapping
+                    painter->drawText(iconX + overlapOffset, iconY + fm.ascent(), checkmark);
+
+                    // Skip the normal drawing below
+                    statusIcon.clear();
+                }
+                else {
+                    statusIcon = "vv";  // Fallback
+                    statusColor = m_isDarkMode ? QColor("#93C5FD") : QColor("#60A5FA");
+                }
             }
 
             if (!statusIcon.isEmpty()) {
                 painter->setPen(statusColor);
-                QFontMetrics fm(statusFont);
                 int iconWidth = fm.horizontalAdvance(statusIcon);
-                int iconX = bubbleRect.right() - 8 - timeWidth - 4 - iconWidth;
+                iconX = bubbleRect.right() - 8 - timeWidth - 4 - iconWidth;
                 int iconY = bubbleRect.bottom() - 5 - timeFm.height();
                 painter->drawText(iconX, iconY + fm.ascent(), statusIcon);
             }
@@ -543,10 +571,10 @@ void MainWindow::setupUi() {
     editBarLayout->setContentsMargins(10, 5, 10, 5);
     m_editLabel = new QLabel("Editing: ");
     m_editLabel->setStyleSheet("color: #888; font-style: italic;");
-    m_cancelEditBtn = new QPushButton("✕");
+    m_cancelEditBtn = new QPushButton("X");  // Simple X
     m_cancelEditBtn->setFixedSize(25, 25);
     m_cancelEditBtn->setCursor(Qt::PointingHandCursor);
-    m_cancelEditBtn->setStyleSheet("border: none; background: transparent; color: #888; font-size: 16px;");
+    m_cancelEditBtn->setStyleSheet("border: none; background: transparent; color: #888; font-size: 16px; font-weight: bold;");
     editBarLayout->addWidget(m_editLabel);
     editBarLayout->addStretch();
     editBarLayout->addWidget(m_cancelEditBtn);
