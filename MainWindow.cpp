@@ -24,6 +24,7 @@
 #include <QStandardPaths>
 #include <QDir>
 #include <QCryptographicHash>
+#include <QUuid>
 
 // Custom role to store the avatar URL in items for updating later
 const int AvatarUrlRole = Qt::UserRole + 10;
@@ -299,12 +300,56 @@ public:
         doc.drawContents(painter);
         painter->translate(-textRect.topLeft());
 
+        // Draw timestamp first to calculate its width
         QDateTime dt;
         dt.setSecsSinceEpoch(timestamp);
         QString timeStr = dt.toString("hh:mm AP");
         painter->setPen(timeColor);
         QFont timeFont = option.font;
         timeFont.setPixelSize(9);
+        painter->setFont(timeFont);
+        QFontMetrics timeFm(timeFont);
+        int timeWidth = timeFm.horizontalAdvance(timeStr);
+
+        // NEW: Draw status icon for own messages (Pending / Sent / Seen) - LEFT of timestamp
+        if (isMe) {
+            int statusInt = index.data(Qt::UserRole + 5).toInt();  // NEW: Status stored as int
+            MessageStatus status = static_cast<MessageStatus>(statusInt);
+
+            QFont statusFont = option.font;
+            statusFont.setPixelSize(9);
+            statusFont.setBold(true);
+            painter->setFont(statusFont);
+
+            QString statusIcon;
+            QColor statusColor = timeColor;
+
+            if (status == MessageStatus::Pending) {
+                statusIcon = "...";  // Three dots for pending
+                statusColor = QColor("#999999");  // Gray
+            }
+            else if (status == MessageStatus::Sent) {
+                statusIcon = "v";  // Single v for sent
+                statusColor = QColor("#999999");  // Gray
+            }
+            else if (status == MessageStatus::Seen) {
+                statusIcon = "vv";  // Double v for seen
+                statusColor = m_isDarkMode ? QColor("#4A9EFF") : QColor("#0084FF");  // Blue when seen
+            }
+
+            if (!statusIcon.isEmpty()) {
+                painter->setPen(statusColor);
+                QFontMetrics fm(statusFont);
+                int iconWidth = fm.horizontalAdvance(statusIcon);
+                // Position icon LEFT of the timestamp with 4px gap
+                int iconX = bubbleRect.right() - 8 - timeWidth - 4 - iconWidth;
+                int iconY = bubbleRect.bottom() - 5 - timeFm.height();
+                painter->drawText(iconX, iconY + fm.ascent(), statusIcon);
+            }
+        }
+
+        // Draw timestamp on the right
+        painter->setPen(timeColor);
         painter->setFont(timeFont);
         painter->drawText(bubbleRect.adjusted(0, 0, -8, -5), Qt::AlignBottom | Qt::AlignRight, timeStr);
 
@@ -348,6 +393,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_client, &WebSocketClient::messageReceived, this, &MainWindow::onMessageReceived);
     connect(m_client, &WebSocketClient::userListUpdated, this, &MainWindow::onUserListUpdated);
     connect(m_client, &WebSocketClient::newChatCreated, this, &MainWindow::onNewChatCreated);
+    connect(m_client, &WebSocketClient::messageSeenUpdate, this, &MainWindow::onMessageSeenUpdate);
 
     m_statusLabel->setText("Connecting to server...");
     m_client->connectToServer();
@@ -1008,9 +1054,17 @@ void MainWindow::renderMessages(const QString& chatId) {
     m_chatList->clear();
 
     if (m_chats.contains(chatId)) {
-        const auto& msgs = m_chats[chatId].messages;
-        for (const auto& msg : msgs) {
+        Chat& chat = m_chats[chatId];
+        for (auto& msg : chat.messages) {
+            // Calculate proper status based on seenBy
+            msg.status = calculateMessageStatus(msg, chat);
             addMessageBubble(msg, false, false);
+
+            // Send seen receipt for messages we haven't seen yet
+            if (msg.senderId != m_client->currentUserId() && !msg.seenBy.contains(m_client->currentUserId())) {
+                m_client->sendMessageSeen(chatId, msg.messageId);
+                msg.seenBy.append(m_client->currentUserId());
+            }
         }
     }
     scrollToBottom();
@@ -1034,6 +1088,8 @@ void MainWindow::addMessageBubble(const Message& msg, bool appendStretch, bool a
     item->setData(Qt::UserRole + 2, senderName);
     item->setData(Qt::UserRole + 3, msg.timestamp);
     item->setData(Qt::UserRole + 4, isMe);
+    item->setData(Qt::UserRole + 5, static_cast<int>(msg.status));  // NEW: Store status
+    item->setData(Qt::UserRole + 6, msg.messageId);  // NEW: Store messageId for updates
 
     if (!isMe) {
         // Convert to full URL
@@ -1065,6 +1121,8 @@ void MainWindow::prependMessageBubble(const Message& msg) {
     item->setData(Qt::UserRole + 2, senderName);
     item->setData(Qt::UserRole + 3, msg.timestamp);
     item->setData(Qt::UserRole + 4, isMe);
+    item->setData(Qt::UserRole + 5, static_cast<int>(msg.status));  // NEW: Store status
+    item->setData(Qt::UserRole + 6, msg.messageId);  // NEW: Store messageId for updates
 
     if (!isMe) {
         // Convert to full URL
@@ -1083,7 +1141,48 @@ void MainWindow::prependMessageBubble(const Message& msg) {
     m_chatList->insertItem(0, item);
 }
 
+// NEW: Update message status in UI
+void MainWindow::updateMessageStatus(const QString& messageId, MessageStatus newStatus) {
+    // Update in chat list UI
+    for (int i = 0; i < m_chatList->count(); i++) {
+        QListWidgetItem* item = m_chatList->item(i);
+        QString itemMsgId = item->data(Qt::UserRole + 6).toString();  // We'll store msgId here
+        if (itemMsgId == messageId) {
+            item->setData(Qt::UserRole + 5, static_cast<int>(newStatus));
+            // Use row() and model()->index() instead of protected indexFromItem()
+            QModelIndex modelIndex = m_chatList->model()->index(i, 0);
+            m_chatList->update(m_chatList->visualRect(modelIndex));
+            break;
+        }
+    }
+
+    // Update in stored messages
+    for (auto& chat : m_chats) {
+        for (auto& msg : chat.messages) {
+            if (msg.messageId == messageId) {
+                msg.status = newStatus;
+                break;
+            }
+        }
+    }
+}
+
 void MainWindow::onMessageReceived(const Message& msg) {
+    // NEW: Check if this is confirmation of a pending message we sent
+    bool isPendingConfirmation = false;
+    QString pendingIdToRemove;
+
+    if (msg.senderId == m_client->currentUserId()) {
+        // Check if we have a pending message with matching text and chatId
+        for (auto it = m_pendingMessages.begin(); it != m_pendingMessages.end(); ++it) {
+            if (it.value().text == msg.text && it.value().chatId == msg.chatId) {
+                isPendingConfirmation = true;
+                pendingIdToRemove = it.key();
+                break;
+            }
+        }
+    }
+
     if (m_chats.contains(msg.chatId)) {
         m_chats[msg.chatId].messages.push_back(msg);
         // Move chat to top in sidebar
@@ -1099,9 +1198,89 @@ void MainWindow::onMessageReceived(const Message& msg) {
     // ALWAYS display the message if it's for the current chat
     if (m_currentChatId == msg.chatId) {
         bool wasAtBottom = isScrolledToBottom();
+
+        // NEW: If this confirms a pending message, remove the pending one first
+        if (isPendingConfirmation) {
+            for (int i = 0; i < m_chatList->count(); i++) {
+                QListWidgetItem* item = m_chatList->item(i);
+                if (item->data(Qt::UserRole + 6).toString() == pendingIdToRemove) {
+                    delete m_chatList->takeItem(i);
+                    break;
+                }
+            }
+            m_pendingMessages.remove(pendingIdToRemove);
+        }
+
         addMessageBubble(msg, false, false);
+
+        // NEW: Send seen receipt if this is someone else's message
+        if (msg.senderId != m_client->currentUserId()) {
+            m_client->sendMessageSeen(msg.chatId, msg.messageId);
+        }
+
         if (wasAtBottom || msg.senderId == m_client->currentUserId()) {
             smoothScrollToBottom();
+        }
+    }
+    else if (isPendingConfirmation) {
+        // Message confirmed but not in current chat - just remove from pending
+        m_pendingMessages.remove(pendingIdToRemove);
+    }
+}
+
+// NEW: Calculate message status based on seenBy list
+MessageStatus MainWindow::calculateMessageStatus(const Message& msg, const Chat& chat) {
+    // Not our message = no status needed
+    if (msg.senderId != m_client->currentUserId()) {
+        return MessageStatus::Sent;
+    }
+
+    // Pending messages
+    if (msg.messageId.startsWith("temp_")) {
+        return MessageStatus::Pending;
+    }
+
+    // Check if seen by others (exclude ourselves)
+    int otherMembersCount = 0;
+    int seenByOthers = 0;
+
+    for (const QString& memberId : chat.members) {
+        if (memberId != m_client->currentUserId()) {
+            otherMembersCount++;
+            if (msg.seenBy.contains(memberId)) {
+                seenByOthers++;
+            }
+        }
+    }
+
+    // If seen by at least one other person, mark as Seen
+    if (seenByOthers > 0) {
+        return MessageStatus::Seen;
+    }
+
+    // Otherwise just Sent
+    return MessageStatus::Sent;
+}
+
+void MainWindow::onMessageSeenUpdate(const QString& chatId, const QString& messageId, const QString& userId) {
+    // Update the message's seenBy list
+    if (m_chats.contains(chatId)) {
+        for (auto& msg : m_chats[chatId].messages) {
+            if (msg.messageId == messageId) {
+                if (!msg.seenBy.contains(userId)) {
+                    msg.seenBy.append(userId);
+                }
+
+                // Recalculate status
+                MessageStatus newStatus = calculateMessageStatus(msg, m_chats[chatId]);
+                msg.status = newStatus;
+
+                // Update UI if this is the current chat
+                if (m_currentChatId == chatId) {
+                    updateMessageStatus(messageId, newStatus);
+                }
+                break;
+            }
         }
     }
 }
@@ -1109,6 +1288,28 @@ void MainWindow::onMessageReceived(const Message& msg) {
 void MainWindow::onSendBtnClicked() {
     QString text = m_messageInput->text().trimmed();
     if (text.isEmpty() || m_currentChatId.isEmpty()) return;
-    m_client->sendMessage(m_currentChatId, text);  // Server creates chat if it doesn't exist
+
+    // NEW: Create optimistic/pending message
+    QString tempId = "temp_" + QUuid::createUuid().toString(QUuid::WithoutBraces);
+    Message pendingMsg;
+    pendingMsg.messageId = tempId;
+    pendingMsg.chatId = m_currentChatId;
+    pendingMsg.senderId = m_client->currentUserId();
+    pendingMsg.text = text;
+    pendingMsg.timestamp = QDateTime::currentSecsSinceEpoch();
+    pendingMsg.status = MessageStatus::Pending;  // Show clock icon
+
+    // Store in pending map
+    m_pendingMessages[tempId] = pendingMsg;
+
+    // Show immediately in UI
+    bool wasAtBottom = isScrolledToBottom();
+    addMessageBubble(pendingMsg, false, false);
+    if (wasAtBottom) {
+        smoothScrollToBottom();
+    }
+
+    // Send to server
+    m_client->sendMessage(m_currentChatId, text);
     m_messageInput->clear();
 }

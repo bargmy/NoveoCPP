@@ -1,10 +1,17 @@
-#ifndef DATASTRUCTURES_H
+﻿#ifndef DATASTRUCTURES_H
 #define DATASTRUCTURES_H
 
 #include <QString>
 #include <QStringList>
 #include <QJsonObject>
 #include <vector>
+
+// Message delivery status
+enum class MessageStatus {
+    Pending,   // Waiting for server confirmation (⏱)
+    Sent,      // Confirmed by server (✓)
+    Seen       // Seen by recipient(s) (✓✓)
+};
 
 struct User {
     QString userId;
@@ -19,6 +26,12 @@ struct Message {
     QString senderId;
     QString text;
     qint64 timestamp;
+
+    // NEW: Status tracking
+    MessageStatus status = MessageStatus::Sent;  // Default for received messages
+
+    // NEW: Seen tracking
+    QStringList seenBy;  // List of user IDs who have seen this message
 };
 
 struct Chat {
