@@ -27,6 +27,8 @@
 #include <QUuid>
 #include <QMenu>
 #include <QDebug>
+#include <algorithm>
+#include <QMessageBox>
 
 // Custom role to store the avatar URL in items for updating later
 const int AvatarUrlRole = Qt::UserRole + 10;
@@ -129,9 +131,10 @@ public:
     }
 
     void getBubbleLayout(const QString& text, const QString& sender, bool isMe, int viewWidth,
-        QRect& bubbleRect, QRect& textRect, QRect& nameRect, QRect& avatarRect, int& neededHeight) const {
+        QRect& bubbleRect, QRect& textRect, QRect& nameRect, QRect& avatarRect, int& neededHeight, bool hasReply = false) const {
         int maxBubbleWidth = viewWidth * 0.75;
         int nameHeight = isMe ? 0 : 18;
+        int replyQuoteHeight = hasReply ? 35 : 0;  // NEW: Add space for reply quote
         int timeHeight = 12;
         int bubblePadding = 16;
         int avatarSize = 38;
@@ -177,7 +180,7 @@ public:
         // NEW: Increased minimum width to 100 to fit "vv 12:45 PM" comfortably
         int bubbleW = qMax(contentWidth, 100);
 
-        int bubbleH = textHeight + nameHeight + timeHeight + bubblePadding;
+        int bubbleH = textHeight + nameHeight + replyQuoteHeight + timeHeight + bubblePadding;  // NEW: Include reply quote
         neededHeight = bubbleH + 10;
 
         int x;
@@ -194,10 +197,10 @@ public:
 
         if (!isMe) {
             nameRect = QRect(x + 10, 5 + 5, bubbleW - 20, 15);
-            textRect = QRect(x + 10, 5 + 23, bubbleW - 20, textHeight);
+            textRect = QRect(x + 10, 5 + 23 + replyQuoteHeight, bubbleW - 20, textHeight);  // NEW: Offset by reply
         }
         else {
-            textRect = QRect(x + 10, 5 + 8, bubbleW - 20, textHeight);
+            textRect = QRect(x + 10, 5 + 8 + replyQuoteHeight, bubbleW - 20, textHeight);  // NEW: Offset by reply
         }
     }
 
@@ -210,10 +213,12 @@ public:
         qint64 timestamp = index.data(Qt::UserRole + 3).toLongLong();
         bool isMe = index.data(Qt::UserRole + 4).toBool();
         QIcon avatar = qvariant_cast<QIcon>(index.data(Qt::DecorationRole));
+        QString replyToId = index.data(Qt::UserRole + 9).toString();  // NEW: Get reply info
+        bool hasReply = !replyToId.isEmpty();  // NEW: Check if has reply
 
         QRect bubbleRect, textRect, nameRect, avatarRect;
         int neededHeight;
-        getBubbleLayout(text, sender, isMe, option.rect.width(), bubbleRect, textRect, nameRect, avatarRect, neededHeight);
+        getBubbleLayout(text, sender, isMe, option.rect.width(), bubbleRect, textRect, nameRect, avatarRect, neededHeight, hasReply);  // NEW: Pass hasReply
 
         bubbleRect.translate(0, option.rect.top());
         textRect.translate(0, option.rect.top());
@@ -288,6 +293,40 @@ public:
             }
         }
 
+        // NEW: Draw reply quote if this is a reply
+        // The space is already allocated in getBubbleLayout via replyQuoteHeight
+        if (!replyToId.isEmpty()) {
+            // Calculate reply quote position (should be right after nameRect for others, or at top for me)
+            int replyQuoteY;
+            if (!isMe) {
+                replyQuoteY = nameRect.bottom() + 3;  // Below name
+            }
+            else {
+                replyQuoteY = bubbleRect.top() + 8;  // Top of bubble for sent messages
+            }
+
+            int replyQuoteX = bubbleRect.left() + 10;
+
+            // Draw reply bar (vertical line)
+            painter->setPen(m_isDarkMode ? QColor("#666") : QColor("#ccc"));
+            painter->drawLine(replyQuoteX, replyQuoteY, replyQuoteX, replyQuoteY + 28);
+
+            // Reply text preview - look up dynamically
+            QFont replyFont("Segoe UI", 9);
+            replyFont.setItalic(true);
+            painter->setFont(replyFont);
+            painter->setPen(m_isDarkMode ? QColor("#aaa") : QColor("#666"));
+
+            // NEW: Try to get cached reply text first, otherwise indicate it's a reply
+            QString replyText = index.data(Qt::UserRole + 10).toString();
+            if (replyText.isEmpty()) {
+                replyText = "[Original message]";  // Fallback text
+            }
+            QString replyPreview = replyText.length() > 40 ? replyText.left(40) + "..." : replyText;
+            QFontMetrics replyFm(replyFont);
+            painter->drawText(replyQuoteX + 6, replyQuoteY + replyFm.ascent() + 8, replyPreview);
+        }
+
         painter->setPen(textColor);
         QTextDocument doc;
         QFont textFont("Segoe UI", 10);
@@ -299,7 +338,7 @@ public:
         doc.setHtml(html);
 
         doc.setTextWidth(textRect.width());
-        painter->translate(textRect.topLeft());
+        painter->translate(textRect.topLeft());  // Use textRect position (already offset by getBubbleLayout)
         doc.drawContents(painter);
         painter->translate(-textRect.topLeft());
 
@@ -409,10 +448,12 @@ public:
         QString text = index.data(Qt::UserRole + 1).toString();
         QString sender = index.data(Qt::UserRole + 2).toString();
         bool isMe = index.data(Qt::UserRole + 4).toBool();
+        QString replyToId = index.data(Qt::UserRole + 9).toString();  // NEW: Get reply info
+        bool hasReply = !replyToId.isEmpty();  // NEW: Check if has reply
 
         QRect b, t, n, a;
         int h;
-        getBubbleLayout(text, sender, isMe, option.rect.width(), b, t, n, a, h);
+        getBubbleLayout(text, sender, isMe, option.rect.width(), b, t, n, a, h, hasReply);  // NEW: Pass hasReply
         return QSize(option.rect.width(), h);
     }
 };
@@ -444,6 +485,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_client, &WebSocketClient::newChatCreated, this, &MainWindow::onNewChatCreated);
     connect(m_client, &WebSocketClient::messageSeenUpdate, this, &MainWindow::onMessageSeenUpdate);
     connect(m_client, &WebSocketClient::messageUpdated, this, &MainWindow::onMessageUpdated);
+    connect(m_client, &WebSocketClient::messageDeleted, this, &MainWindow::onMessageDeleted);
 
     m_statusLabel->setText("Connecting to server...");
     m_client->connectToServer();
@@ -562,6 +604,29 @@ void MainWindow::setupUi() {
 
     connect(m_chatList->verticalScrollBar(), &QScrollBar::valueChanged, this, &MainWindow::onScrollValueChanged);
 
+    // NEW: Reply Bar (hidden by default)
+    m_replyBar = new QWidget();
+    m_replyBar->setObjectName("replyBar");
+    m_replyBar->setFixedHeight(40);
+    m_replyBar->hide();  // Hidden by default
+    QHBoxLayout* replyBarLayout = new QHBoxLayout(m_replyBar);
+    replyBarLayout->setContentsMargins(10, 5, 10, 5);
+    QVBoxLayout* replyTextLayout = new QVBoxLayout();
+    QLabel* replyTitle = new QLabel("Replying to:");
+    replyTitle->setStyleSheet("color: #888; font-size: 10px;");
+    m_replyLabel = new QLabel();
+    m_replyLabel->setStyleSheet("color: #333; font-weight: 500;");
+    replyTextLayout->addWidget(replyTitle);
+    replyTextLayout->addWidget(m_replyLabel);
+    m_cancelReplyBtn = new QPushButton("X");
+    m_cancelReplyBtn->setFixedSize(25, 25);
+    m_cancelReplyBtn->setCursor(Qt::PointingHandCursor);
+    m_cancelReplyBtn->setStyleSheet("border: none; background: transparent; color: #888; font-size: 16px; font-weight: bold;");
+    replyBarLayout->addLayout(replyTextLayout);
+    replyBarLayout->addStretch();
+    replyBarLayout->addWidget(m_cancelReplyBtn);
+    connect(m_cancelReplyBtn, &QPushButton::clicked, this, &MainWindow::onCancelReply);
+
     // NEW: Edit Bar (hidden by default)
     m_editBar = new QWidget();
     m_editBar->setObjectName("editBar");
@@ -594,6 +659,7 @@ void MainWindow::setupUi() {
 
     chatAreaLayout->addWidget(header);
     chatAreaLayout->addWidget(m_chatList);
+    chatAreaLayout->addWidget(m_replyBar);  // NEW: Add reply bar
     chatAreaLayout->addWidget(m_editBar);  // NEW: Add edit bar
     chatAreaLayout->addWidget(inputArea);
 
@@ -1143,6 +1209,43 @@ void MainWindow::renderMessages(const QString& chatId) {
     scrollToBottom();
 }
 
+QString MainWindow::getReplyPreviewText(const QString& replyToId, const QString& chatId) {
+    QString replyText;
+
+    // First try stored messages
+    if (m_chats.contains(chatId)) {
+        for (const auto& m : m_chats[chatId].messages) {
+            if (m.messageId == replyToId) {
+                replyText = m.text;
+                break;
+            }
+        }
+    }
+
+    // If not found, search visible list items
+    if (replyText.isEmpty()) {
+        for (int i = 0; i < m_chatList->count(); i++) {
+            QListWidgetItem* listItem = m_chatList->item(i);
+            if (listItem->data(Qt::UserRole + 6).toString() == replyToId) {
+                replyText = listItem->data(Qt::UserRole + 1).toString();
+                break;
+            }
+        }
+    }
+
+    // FINAL FALLBACK: Clean up URLs from old cached messages
+    if (!replyText.isEmpty() && replyText.startsWith("https://") && replyText.contains("/static/upl")) {
+        replyText = "[Image]";
+    }
+
+    // If still empty, show fallback
+    if (replyText.isEmpty()) {
+        replyText = "[Original message]";
+    }
+
+    return replyText;
+}
+
 void MainWindow::addMessageBubble(const Message& msg, bool appendStretch, bool animate) {
     Q_UNUSED(appendStretch);
     Q_UNUSED(animate);
@@ -1161,10 +1264,17 @@ void MainWindow::addMessageBubble(const Message& msg, bool appendStretch, bool a
     item->setData(Qt::UserRole + 2, senderName);
     item->setData(Qt::UserRole + 3, msg.timestamp);
     item->setData(Qt::UserRole + 4, isMe);
-    item->setData(Qt::UserRole + 5, static_cast<int>(msg.status));  // NEW: Store status
-    item->setData(Qt::UserRole + 6, msg.messageId);  // NEW: Store messageId for updates
-    item->setData(Qt::UserRole + 7, msg.editedAt);  // NEW: Store editedAt
-    item->setData(Qt::UserRole + 8, msg.senderId);  // NEW: Store senderId for context menu
+    item->setData(Qt::UserRole + 5, static_cast<int>(msg.status));
+    item->setData(Qt::UserRole + 6, msg.messageId);
+    item->setData(Qt::UserRole + 7, msg.editedAt);
+    item->setData(Qt::UserRole + 8, msg.senderId);
+    item->setData(Qt::UserRole + 9, msg.replyToId);
+
+    // NEW: Store reply text preview using helper
+    if (!msg.replyToId.isEmpty()) {
+        QString replyText = getReplyPreviewText(msg.replyToId, msg.chatId);
+        item->setData(Qt::UserRole + 10, replyText);
+    }
 
     if (!isMe) {
         // Convert to full URL
@@ -1200,6 +1310,13 @@ void MainWindow::prependMessageBubble(const Message& msg) {
     item->setData(Qt::UserRole + 6, msg.messageId);  // NEW: Store messageId for updates
     item->setData(Qt::UserRole + 7, msg.editedAt);  // NEW: Store editedAt
     item->setData(Qt::UserRole + 8, msg.senderId);  // NEW: Store senderId
+    item->setData(Qt::UserRole + 9, msg.replyToId);  // NEW: Store replyToId
+
+    // NEW: Store reply text preview using helper
+    if (!msg.replyToId.isEmpty()) {
+        QString replyText = getReplyPreviewText(msg.replyToId, msg.chatId);
+        item->setData(Qt::UserRole + 10, replyText);
+    }
 
     if (!isMe) {
         // Convert to full URL
@@ -1467,9 +1584,18 @@ void MainWindow::onDeleteMessage() {
 
     QString messageId = menu->property("messageId").toString();
 
-    // TODO: Implement delete functionality
-    // For now, just show a message box
-    qDebug() << "Delete message:" << messageId;
+    // Show confirmation dialog
+    QMessageBox::StandardButton reply;
+    reply = QMessageBox::question(this, "Delete Message",
+        "Are you sure you want to delete this message?",
+        QMessageBox::Yes | QMessageBox::No);
+
+    if (reply == QMessageBox::Yes) {
+        // Send delete request to server
+        if (m_client && !m_currentChatId.isEmpty()) {
+            m_client->deleteMessage(m_currentChatId, messageId);
+        }
+    }
 }
 
 void MainWindow::onReplyToMessage() {
@@ -1479,8 +1605,39 @@ void MainWindow::onReplyToMessage() {
     QString messageId = menu->property("messageId").toString();
     QString messageText = menu->property("messageText").toString();
 
-    // TODO: Implement reply functionality
-    qDebug() << "Reply to message:" << messageId << messageText;
+    // Find the message to get sender info
+    if (!m_chats.contains(m_currentChatId)) return;
+
+    Message* replyMsg = nullptr;
+    for (auto& msg : m_chats[m_currentChatId].messages) {
+        if (msg.messageId == messageId) {
+            replyMsg = &msg;
+            break;
+        }
+    }
+
+    if (!replyMsg) return;
+
+    // Enter reply mode
+    m_replyingToMessageId = messageId;
+    m_replyingToText = messageText;
+
+    // Get sender name
+    QString senderName = "Unknown";
+    if (m_users.contains(replyMsg->senderId)) {
+        senderName = m_users[replyMsg->senderId].username;
+    }
+    m_replyingToSender = senderName;
+
+    // Show reply bar with preview
+    QString preview = messageText.length() > 50
+        ? messageText.left(50) + "..."
+        : messageText;
+    m_replyLabel->setText(senderName + ": " + preview);
+    m_replyBar->show();
+
+    // Focus input
+    m_messageInput->setFocus();
 }
 
 void MainWindow::onForwardMessage() {
@@ -1500,6 +1657,14 @@ void MainWindow::onCancelEdit() {
     m_editBar->hide();
     m_messageInput->clear();
     m_sendBtn->setText("Send");
+}
+
+void MainWindow::onCancelReply() {
+    // Exit reply mode
+    m_replyingToMessageId.clear();
+    m_replyingToText.clear();
+    m_replyingToSender.clear();
+    m_replyBar->hide();
 }
 
 void MainWindow::onMessageUpdated(const QString& chatId, const QString& messageId, const QString& newContent, qint64 editedAt) {
@@ -1531,6 +1696,26 @@ void MainWindow::onMessageUpdated(const QString& chatId, const QString& messageI
     }
 }
 
+void MainWindow::onMessageDeleted(const QString& chatId, const QString& messageId) {
+    // Remove from stored messages
+    if (m_chats.contains(chatId)) {
+        auto& messages = m_chats[chatId].messages;
+        messages.erase(std::remove_if(messages.begin(), messages.end(),
+            [&messageId](const Message& m) { return m.messageId == messageId; }), messages.end());
+    }
+
+    // Remove from UI if this is the current chat
+    if (m_currentChatId == chatId) {
+        for (int i = 0; i < m_chatList->count(); i++) {
+            QListWidgetItem* item = m_chatList->item(i);
+            if (item->data(Qt::UserRole + 6).toString() == messageId) {
+                delete m_chatList->takeItem(i);
+                break;
+            }
+        }
+    }
+}
+
 void MainWindow::onSendBtnClicked() {
     QString text = m_messageInput->text().trimmed();
     if (text.isEmpty() || m_currentChatId.isEmpty()) return;
@@ -1551,8 +1736,7 @@ void MainWindow::onSendBtnClicked() {
         return;
     }
 
-    // Normal send flow
-    // NEW: Create optimistic/pending message
+    // Normal send flow (with optional reply)
     QString tempId = "temp_" + QUuid::createUuid().toString(QUuid::WithoutBraces);
     Message pendingMsg;
     pendingMsg.messageId = tempId;
@@ -1561,6 +1745,11 @@ void MainWindow::onSendBtnClicked() {
     pendingMsg.text = text;
     pendingMsg.timestamp = QDateTime::currentSecsSinceEpoch();
     pendingMsg.status = MessageStatus::Pending;  // Show clock icon
+
+    // NEW: Include reply info if in reply mode
+    if (!m_replyingToMessageId.isEmpty()) {
+        pendingMsg.replyToId = m_replyingToMessageId;
+    }
 
     // Store in pending map
     m_pendingMessages[tempId] = pendingMsg;
@@ -1572,7 +1761,12 @@ void MainWindow::onSendBtnClicked() {
         smoothScrollToBottom();
     }
 
-    // Send to server
-    m_client->sendMessage(m_currentChatId, text);
+    // Send to server with replyToId if present
+    m_client->sendMessage(m_currentChatId, text, m_replyingToMessageId);
+
+    // Clear input and exit reply mode
     m_messageInput->clear();
+    if (!m_replyingToMessageId.isEmpty()) {
+        onCancelReply();
+    }
 }

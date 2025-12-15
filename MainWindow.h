@@ -68,7 +68,9 @@ private slots:
     void onReplyToMessage();
     void onForwardMessage();
     void onCancelEdit();
+    void onCancelReply();
     void onMessageUpdated(const QString& chatId, const QString& messageId, const QString& newContent, qint64 editedAt);
+    void onMessageDeleted(const QString& chatId, const QString& messageId);
 
     // NEW: Slot for scroll detection
     void onScrollValueChanged(int value);
@@ -76,6 +78,9 @@ private slots:
 private:
     void setupUi();
     void applyTheme();
+
+    // NEW: Helper to get clean reply preview text
+    QString getReplyPreviewText(const QString& replyToId, const QString& chatId);
     void renderMessages(const QString& chatId);
     void addMessageBubble(const Message& msg, bool appendStretch, bool animate);
 
@@ -127,6 +132,11 @@ private:
     QLabel* m_editLabel;
     QPushButton* m_cancelEditBtn;
 
+    // NEW: Reply mode UI
+    QWidget* m_replyBar;
+    QLabel* m_replyLabel;
+    QPushButton* m_cancelReplyBtn;
+
     // Data
     QMap<QString, User> m_users;
     QMap<QString, Chat> m_chats;
@@ -140,6 +150,11 @@ private:
     // NEW: Edit mode state
     QString m_editingMessageId;
     QString m_editingOriginalText;
+
+    // NEW: Reply mode state
+    QString m_replyingToMessageId;
+    QString m_replyingToText;
+    QString m_replyingToSender;
 
     // NEW: Flag to prevent spamming history requests
     bool m_isLoadingHistory = false;

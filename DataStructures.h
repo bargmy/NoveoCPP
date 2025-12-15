@@ -35,6 +35,9 @@ struct Message {
 
     // NEW: Edit tracking
     qint64 editedAt = 0;  // Timestamp when edited (0 = not edited)
+
+    // NEW: Reply tracking
+    QString replyToId;  // Message ID this is replying to (empty = not a reply)
 };
 
 struct Chat {

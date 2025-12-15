@@ -27,6 +27,9 @@ public:
     // NEW: Edit message
     void editMessage(const QString& chatId, const QString& messageId, const QString& newText);
 
+    // NEW: Delete message
+    void deleteMessage(const QString& chatId, const QString& messageId);
+
     void logout();
 
     bool isConnected() const;
@@ -44,6 +47,7 @@ signals:
     void newChatCreated(const Chat& chat);
     void messageSeenUpdate(const QString& chatId, const QString& messageId, const QString& userId);
     void messageUpdated(const QString& chatId, const QString& messageId, const QString& newContent, qint64 editedAt);
+    void messageDeleted(const QString& chatId, const QString& messageId);
 
 private slots:
     void onConnected();
@@ -62,6 +66,7 @@ private:
     void handleNewChat(const QJsonObject& data);
     void handleMessageSeenUpdate(const QJsonObject& data);
     void handleMessageUpdated(const QJsonObject& data);
+    void handleMessageDeleted(const QJsonObject& data);
 };
 
 #endif // WEBSOCKETCLIENT_H

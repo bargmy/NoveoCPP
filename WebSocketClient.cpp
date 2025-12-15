@@ -124,6 +124,9 @@ void WebSocketClient::onTextMessageReceived(QString message) {
     else if (type == "message_updated") {
         handleMessageUpdated(obj);
     }
+    else if (type == "message_deleted") {
+        handleMessageDeleted(obj);
+    }
     else if (type == "error") {
         emit errorOccurred(obj["message"].toString());
     }
@@ -173,11 +176,32 @@ void WebSocketClient::handleChatHistory(const QJsonObject& data) {
                 else {
                     contentObj = mObj["content"].toObject();
                 }
-                msg.text = contentObj["text"].toString();
+
+                // NEW: Check if this is a file message
+                if (contentObj.contains("file") && !contentObj["file"].isNull()) {
+                    // This is a file/image message
+                    QJsonObject fileObj = contentObj["file"].toObject();
+                    QString fileName = fileObj["name"].toString();
+                    if (!fileName.isEmpty()) {
+                        msg.text = "[" + fileName + "]";  // Show [filename]
+                    }
+                    else {
+                        msg.text = "[File]";  // Fallback
+                    }
+                }
+                else {
+                    // Regular text message
+                    msg.text = contentObj["text"].toString();
+                }
 
                 // NEW: Parse editedAt if present
                 if (mObj.contains("editedAt")) {
                     msg.editedAt = (qint64)mObj["editedAt"].toDouble();
+                }
+
+                // NEW: Parse replyToId if present
+                if (mObj.contains("replyToId")) {
+                    msg.replyToId = mObj["replyToId"].toString();
                 }
 
                 // NEW: Parse seenBy if present
@@ -211,11 +235,32 @@ void WebSocketClient::handleMessage(const QJsonObject& mObj) {
     else {
         contentObj = mObj["content"].toObject();
     }
-    msg.text = contentObj["text"].toString();
+
+    // Check if this is a file message
+    if (contentObj.contains("file") && !contentObj["file"].isNull()) {
+        // This is a file/image message
+        QJsonObject fileObj = contentObj["file"].toObject();
+        QString fileName = fileObj["name"].toString();
+        if (!fileName.isEmpty()) {
+            msg.text = "[" + fileName + "]";
+        }
+        else {
+            msg.text = "[File]";
+        }
+    }
+    else {
+        // Regular text message
+        msg.text = contentObj["text"].toString();
+    }
 
     // NEW: Parse editedAt if present
     if (mObj.contains("editedAt")) {
         msg.editedAt = (qint64)mObj["editedAt"].toDouble();
+    }
+
+    // NEW: Parse replyToId if present
+    if (mObj.contains("replyToId")) {
+        msg.replyToId = mObj["replyToId"].toString();
     }
 
     // NEW: Parse seenBy if present
@@ -309,6 +354,25 @@ void WebSocketClient::handleMessageUpdated(const QJsonObject& data) {
     }
 
     emit messageUpdated(chatId, messageId, newContent, editedAt);
+}
+
+void WebSocketClient::deleteMessage(const QString& chatId, const QString& messageId) {
+    if (!isConnected()) return;
+
+    QJsonObject payload;
+    payload["type"] = "delete_message";
+    payload["chatId"] = chatId;
+    payload["messageId"] = messageId;
+
+    QJsonDocument doc(payload);
+    m_webSocket.sendTextMessage(QString::fromUtf8(doc.toJson(QJsonDocument::Compact)));
+}
+
+void WebSocketClient::handleMessageDeleted(const QJsonObject& data) {
+    QString chatId = data["chatId"].toString();
+    QString messageId = data["messageId"].toString();
+
+    emit messageDeleted(chatId, messageId);
 }
 
 void WebSocketClient::logout() {
