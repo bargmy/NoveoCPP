@@ -316,7 +316,7 @@ public:
 
         // NEW: Draw status icon for own messages (Pending / Sent / Seen) - LEFT of timestamp
         if (isMe) {
-            int statusInt = index.data(Qt::UserRole + 5).toInt();  // NEW: Status stored as int
+            int statusInt = index.data(Qt::UserRole + 5).toInt();
             MessageStatus status = static_cast<MessageStatus>(statusInt);
 
             QFont statusFont = option.font;
@@ -328,23 +328,22 @@ public:
             QColor statusColor = timeColor;
 
             if (status == MessageStatus::Pending) {
-                statusIcon = "...";  // Three dots for pending
-                statusColor = QColor("#999999");  // Gray
+                statusIcon = "..";  // Two dots for pending
+                statusColor = QColor("#999999");
             }
             else if (status == MessageStatus::Sent) {
                 statusIcon = "v";  // Single v for sent
-                statusColor = QColor("#999999");  // Gray
+                statusColor = QColor("#999999");
             }
             else if (status == MessageStatus::Seen) {
                 statusIcon = "vv";  // Double v for seen
-                statusColor = m_isDarkMode ? QColor("#4A9EFF") : QColor("#0084FF");  // Blue when seen
+                statusColor = m_isDarkMode ? QColor("#93C5FD") : QColor("#60A5FA");
             }
 
             if (!statusIcon.isEmpty()) {
                 painter->setPen(statusColor);
                 QFontMetrics fm(statusFont);
                 int iconWidth = fm.horizontalAdvance(statusIcon);
-                // Position icon LEFT of the timestamp with 4px gap
                 int iconX = bubbleRect.right() - 8 - timeWidth - 4 - iconWidth;
                 int iconY = bubbleRect.bottom() - 5 - timeFm.height();
                 painter->drawText(iconX, iconY + fm.ascent(), statusIcon);
