@@ -121,6 +121,9 @@ void WebSocketClient::onTextMessageReceived(QString message) {
     else if (type == "message_seen_update") {
         handleMessageSeenUpdate(obj);
     }
+    else if (type == "message_updated") {
+        handleMessageUpdated(obj);
+    }
     else if (type == "error") {
         emit errorOccurred(obj["message"].toString());
     }
@@ -172,6 +175,11 @@ void WebSocketClient::handleChatHistory(const QJsonObject& data) {
                 }
                 msg.text = contentObj["text"].toString();
 
+                // NEW: Parse editedAt if present
+                if (mObj.contains("editedAt")) {
+                    msg.editedAt = (qint64)mObj["editedAt"].toDouble();
+                }
+
                 // NEW: Parse seenBy if present
                 if (mObj.contains("seenBy") && mObj["seenBy"].isArray()) {
                     QJsonArray seenByArr = mObj["seenBy"].toArray();
@@ -204,6 +212,11 @@ void WebSocketClient::handleMessage(const QJsonObject& mObj) {
         contentObj = mObj["content"].toObject();
     }
     msg.text = contentObj["text"].toString();
+
+    // NEW: Parse editedAt if present
+    if (mObj.contains("editedAt")) {
+        msg.editedAt = (qint64)mObj["editedAt"].toDouble();
+    }
 
     // NEW: Parse seenBy if present
     if (mObj.contains("seenBy") && mObj["seenBy"].isArray()) {
@@ -263,6 +276,39 @@ void WebSocketClient::handleMessageSeenUpdate(const QJsonObject& data) {
     QString userId = data["userId"].toString();
 
     emit messageSeenUpdate(chatId, messageId, userId);
+}
+
+void WebSocketClient::editMessage(const QString& chatId, const QString& messageId, const QString& newText) {
+    if (!isConnected()) return;
+
+    QJsonObject payload;
+    payload["type"] = "edit_message";
+    payload["chatId"] = chatId;
+    payload["messageId"] = messageId;
+    payload["newContent"] = newText;
+
+    QJsonDocument doc(payload);
+    m_webSocket.sendTextMessage(QString::fromUtf8(doc.toJson(QJsonDocument::Compact)));
+}
+
+void WebSocketClient::handleMessageUpdated(const QJsonObject& data) {
+    QString chatId = data["chatId"].toString();
+    QString messageId = data["messageId"].toString();
+    qint64 editedAt = (qint64)data["editedAt"].toDouble();
+
+    // Parse new content
+    QString newContent;
+    if (data["newContent"].isString()) {
+        QJsonDocument cd = QJsonDocument::fromJson(data["newContent"].toString().toUtf8());
+        QJsonObject contentObj = cd.object();
+        newContent = contentObj["text"].toString();
+    }
+    else {
+        QJsonObject contentObj = data["newContent"].toObject();
+        newContent = contentObj["text"].toString();
+    }
+
+    emit messageUpdated(chatId, messageId, newContent, editedAt);
 }
 
 void WebSocketClient::logout() {

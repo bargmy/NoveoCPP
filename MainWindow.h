@@ -61,6 +61,15 @@ private slots:
     void onDarkModeToggled(bool checked);
     void onLogoutClicked();
 
+    // NEW: Context menu slots
+    void onChatListContextMenu(const QPoint& pos);
+    void onEditMessage();
+    void onDeleteMessage();
+    void onReplyToMessage();
+    void onForwardMessage();
+    void onCancelEdit();
+    void onMessageUpdated(const QString& chatId, const QString& messageId, const QString& newContent, qint64 editedAt);
+
     // NEW: Slot for scroll detection
     void onScrollValueChanged(int value);
 
@@ -113,6 +122,11 @@ private:
     QLineEdit* m_messageInput;
     QPushButton* m_sendBtn;
 
+    // NEW: Edit mode UI
+    QWidget* m_editBar;
+    QLabel* m_editLabel;
+    QPushButton* m_cancelEditBtn;
+
     // Data
     QMap<QString, User> m_users;
     QMap<QString, Chat> m_chats;
@@ -122,6 +136,10 @@ private:
     // NEW: Pending message tracking for optimistic sends
     // Maps temporary message ID -> Message object
     QMap<QString, Message> m_pendingMessages;
+
+    // NEW: Edit mode state
+    QString m_editingMessageId;
+    QString m_editingOriginalText;
 
     // NEW: Flag to prevent spamming history requests
     bool m_isLoadingHistory = false;

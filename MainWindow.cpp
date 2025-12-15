@@ -25,6 +25,8 @@
 #include <QDir>
 #include <QCryptographicHash>
 #include <QUuid>
+#include <QMenu>
+#include <QDebug>
 
 // Custom role to store the avatar URL in items for updating later
 const int AvatarUrlRole = Qt::UserRole + 10;
@@ -172,7 +174,8 @@ public:
         int textHeight = doc.size().height();
 
         int contentWidth = isMe ? (textWidth + 20) : qMax(textWidth + 20, totalNameWidth + 30);
-        int bubbleW = qMax(contentWidth, 60);
+        // NEW: Increased minimum width to 100 to fit "vv 12:45 PM" comfortably
+        int bubbleW = qMax(contentWidth, 100);
 
         int bubbleH = textHeight + nameHeight + timeHeight + bubblePadding;
         neededHeight = bubbleH + 10;
@@ -353,6 +356,25 @@ public:
         painter->setFont(timeFont);
         painter->drawText(bubbleRect.adjusted(0, 0, -8, -5), Qt::AlignBottom | Qt::AlignRight, timeStr);
 
+        // NEW: Draw "edited" watermark if message was edited
+        qint64 editedAt = index.data(Qt::UserRole + 7).toLongLong();
+        if (editedAt > 0) {
+            QFont editedFont = timeFont;
+            editedFont.setItalic(true);
+            editedFont.setPixelSize(8);
+            painter->setFont(editedFont);
+            painter->setPen(QColor("#888888"));
+
+            QFontMetrics editedFm(editedFont);
+            QString editedText = "edited";
+            int editedWidth = editedFm.horizontalAdvance(editedText);
+
+            // Position "edited" above the timestamp
+            int editedX = bubbleRect.right() - 8 - editedWidth;
+            int editedY = bubbleRect.bottom() - 5 - timeFm.height() - editedFm.height() - 2;
+            painter->drawText(editedX, editedY + editedFm.ascent(), editedText);
+        }
+
         painter->restore();
     }
 
@@ -394,6 +416,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_client, &WebSocketClient::userListUpdated, this, &MainWindow::onUserListUpdated);
     connect(m_client, &WebSocketClient::newChatCreated, this, &MainWindow::onNewChatCreated);
     connect(m_client, &WebSocketClient::messageSeenUpdate, this, &MainWindow::onMessageSeenUpdate);
+    connect(m_client, &WebSocketClient::messageUpdated, this, &MainWindow::onMessageUpdated);
 
     m_statusLabel->setText("Connecting to server...");
     m_client->connectToServer();
@@ -506,7 +529,29 @@ void MainWindow::setupUi() {
     m_chatList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_chatList->setItemDelegate(new MessageDelegate(this));
 
+    // NEW: Enable context menu
+    m_chatList->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_chatList, &QListWidget::customContextMenuRequested, this, &MainWindow::onChatListContextMenu);
+
     connect(m_chatList->verticalScrollBar(), &QScrollBar::valueChanged, this, &MainWindow::onScrollValueChanged);
+
+    // NEW: Edit Bar (hidden by default)
+    m_editBar = new QWidget();
+    m_editBar->setObjectName("editBar");
+    m_editBar->setFixedHeight(35);
+    m_editBar->hide();  // Hidden by default
+    QHBoxLayout* editBarLayout = new QHBoxLayout(m_editBar);
+    editBarLayout->setContentsMargins(10, 5, 10, 5);
+    m_editLabel = new QLabel("Editing: ");
+    m_editLabel->setStyleSheet("color: #888; font-style: italic;");
+    m_cancelEditBtn = new QPushButton("✕");
+    m_cancelEditBtn->setFixedSize(25, 25);
+    m_cancelEditBtn->setCursor(Qt::PointingHandCursor);
+    m_cancelEditBtn->setStyleSheet("border: none; background: transparent; color: #888; font-size: 16px;");
+    editBarLayout->addWidget(m_editLabel);
+    editBarLayout->addStretch();
+    editBarLayout->addWidget(m_cancelEditBtn);
+    connect(m_cancelEditBtn, &QPushButton::clicked, this, &MainWindow::onCancelEdit);
 
     // Input Area
     QWidget* inputArea = new QWidget();
@@ -522,6 +567,7 @@ void MainWindow::setupUi() {
 
     chatAreaLayout->addWidget(header);
     chatAreaLayout->addWidget(m_chatList);
+    chatAreaLayout->addWidget(m_editBar);  // NEW: Add edit bar
     chatAreaLayout->addWidget(inputArea);
 
     appLayout->addWidget(m_sidebarTabs);
@@ -1090,6 +1136,8 @@ void MainWindow::addMessageBubble(const Message& msg, bool appendStretch, bool a
     item->setData(Qt::UserRole + 4, isMe);
     item->setData(Qt::UserRole + 5, static_cast<int>(msg.status));  // NEW: Store status
     item->setData(Qt::UserRole + 6, msg.messageId);  // NEW: Store messageId for updates
+    item->setData(Qt::UserRole + 7, msg.editedAt);  // NEW: Store editedAt
+    item->setData(Qt::UserRole + 8, msg.senderId);  // NEW: Store senderId for context menu
 
     if (!isMe) {
         // Convert to full URL
@@ -1123,6 +1171,8 @@ void MainWindow::prependMessageBubble(const Message& msg) {
     item->setData(Qt::UserRole + 4, isMe);
     item->setData(Qt::UserRole + 5, static_cast<int>(msg.status));  // NEW: Store status
     item->setData(Qt::UserRole + 6, msg.messageId);  // NEW: Store messageId for updates
+    item->setData(Qt::UserRole + 7, msg.editedAt);  // NEW: Store editedAt
+    item->setData(Qt::UserRole + 8, msg.senderId);  // NEW: Store senderId
 
     if (!isMe) {
         // Convert to full URL
@@ -1285,10 +1335,196 @@ void MainWindow::onMessageSeenUpdate(const QString& chatId, const QString& messa
     }
 }
 
+// NEW: Context menu for messages
+void MainWindow::onChatListContextMenu(const QPoint& pos) {
+    QListWidgetItem* item = m_chatList->itemAt(pos);
+    if (!item) return;
+
+    QString messageId = item->data(Qt::UserRole + 6).toString();
+    QString senderId = item->data(Qt::UserRole + 8).toString();
+    bool isMyMessage = (senderId == m_client->currentUserId());
+
+    QMenu contextMenu(this);
+
+    // NEW: Apply dark mode styling to menu
+    if (m_isDarkMode) {
+        contextMenu.setStyleSheet(
+            "QMenu {"
+            "    background-color: #2d2d2d;"
+            "    color: #ffffff;"
+            "    border: 1px solid #444444;"
+            "    padding: 4px;"
+            "}"
+            "QMenu::item {"
+            "    padding: 8px 24px;"
+            "    background-color: transparent;"
+            "}"
+            "QMenu::item:selected {"
+            "    background-color: #3b5278;"
+            "}"
+        );
+    }
+    else {
+        contextMenu.setStyleSheet(
+            "QMenu {"
+            "    background-color: #ffffff;"
+            "    color: #000000;"
+            "    border: 1px solid #cccccc;"
+            "    padding: 4px;"
+            "}"
+            "QMenu::item {"
+            "    padding: 8px 24px;"
+            "    background-color: transparent;"
+            "}"
+            "QMenu::item:selected {"
+            "    background-color: #e3f2fd;"
+            "}"
+        );
+    }
+
+    // Edit and Delete only for own messages
+    if (isMyMessage) {
+        QAction* editAction = contextMenu.addAction("Edit");
+        QAction* deleteAction = contextMenu.addAction("Delete");
+
+        connect(editAction, &QAction::triggered, this, &MainWindow::onEditMessage);
+        connect(deleteAction, &QAction::triggered, this, &MainWindow::onDeleteMessage);
+
+        contextMenu.addSeparator();
+    }
+
+    // Reply and Forward for all messages
+    QAction* replyAction = contextMenu.addAction("Reply");
+    QAction* forwardAction = contextMenu.addAction("Forward");
+
+    connect(replyAction, &QAction::triggered, this, &MainWindow::onReplyToMessage);
+    connect(forwardAction, &QAction::triggered, this, &MainWindow::onForwardMessage);
+
+    // Store the clicked item for the actions to use
+    contextMenu.setProperty("messageId", messageId);
+    contextMenu.setProperty("messageText", item->data(Qt::UserRole + 1).toString());
+
+    contextMenu.exec(m_chatList->mapToGlobal(pos));
+}
+
+void MainWindow::onEditMessage() {
+    QMenu* menu = qobject_cast<QMenu*>(sender()->parent());
+    if (!menu) return;
+
+    QString messageId = menu->property("messageId").toString();
+    QString messageText = menu->property("messageText").toString();
+
+    // Enter edit mode
+    m_editingMessageId = messageId;
+    m_editingOriginalText = messageText;
+
+    // Show edit bar with preview
+    QString preview = messageText.length() > 30
+        ? messageText.left(30) + "..."
+        : messageText;
+    m_editLabel->setText("Editing: " + preview);
+    m_editBar->show();
+
+    // Put message text in input
+    m_messageInput->setText(messageText);
+    m_messageInput->setFocus();
+    m_messageInput->selectAll();
+
+    // Change button text
+    m_sendBtn->setText("Save");
+}
+
+void MainWindow::onDeleteMessage() {
+    QMenu* menu = qobject_cast<QMenu*>(sender()->parent());
+    if (!menu) return;
+
+    QString messageId = menu->property("messageId").toString();
+
+    // TODO: Implement delete functionality
+    // For now, just show a message box
+    qDebug() << "Delete message:" << messageId;
+}
+
+void MainWindow::onReplyToMessage() {
+    QMenu* menu = qobject_cast<QMenu*>(sender()->parent());
+    if (!menu) return;
+
+    QString messageId = menu->property("messageId").toString();
+    QString messageText = menu->property("messageText").toString();
+
+    // TODO: Implement reply functionality
+    qDebug() << "Reply to message:" << messageId << messageText;
+}
+
+void MainWindow::onForwardMessage() {
+    QMenu* menu = qobject_cast<QMenu*>(sender()->parent());
+    if (!menu) return;
+
+    QString messageId = menu->property("messageId").toString();
+
+    // TODO: Implement forward functionality
+    qDebug() << "Forward message:" << messageId;
+}
+
+void MainWindow::onCancelEdit() {
+    // Exit edit mode
+    m_editingMessageId.clear();
+    m_editingOriginalText.clear();
+    m_editBar->hide();
+    m_messageInput->clear();
+    m_sendBtn->setText("Send");
+}
+
+void MainWindow::onMessageUpdated(const QString& chatId, const QString& messageId, const QString& newContent, qint64 editedAt) {
+    // Update in stored messages
+    if (m_chats.contains(chatId)) {
+        for (auto& msg : m_chats[chatId].messages) {
+            if (msg.messageId == messageId) {
+                msg.text = newContent;
+                msg.editedAt = editedAt;
+                break;
+            }
+        }
+    }
+
+    // Update in UI if this is the current chat
+    if (m_currentChatId == chatId) {
+        for (int i = 0; i < m_chatList->count(); i++) {
+            QListWidgetItem* item = m_chatList->item(i);
+            if (item->data(Qt::UserRole + 6).toString() == messageId) {
+                item->setData(Qt::UserRole + 1, newContent);
+                item->setData(Qt::UserRole + 7, editedAt);
+
+                // Force refresh the item
+                QModelIndex modelIndex = m_chatList->model()->index(i, 0);
+                m_chatList->update(m_chatList->visualRect(modelIndex));
+                break;
+            }
+        }
+    }
+}
+
 void MainWindow::onSendBtnClicked() {
     QString text = m_messageInput->text().trimmed();
     if (text.isEmpty() || m_currentChatId.isEmpty()) return;
 
+    // NEW: Check if we're in edit mode
+    if (!m_editingMessageId.isEmpty()) {
+        // Don't send if text hasn't changed
+        if (text == m_editingOriginalText) {
+            onCancelEdit();
+            return;
+        }
+
+        // Send edit request to server
+        m_client->editMessage(m_currentChatId, m_editingMessageId, text);
+
+        // Exit edit mode
+        onCancelEdit();
+        return;
+    }
+
+    // Normal send flow
     // NEW: Create optimistic/pending message
     QString tempId = "temp_" + QUuid::createUuid().toString(QUuid::WithoutBraces);
     Message pendingMsg;

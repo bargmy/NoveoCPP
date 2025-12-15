@@ -24,6 +24,9 @@ public:
     // NEW: Send seen receipt
     void sendMessageSeen(const QString& chatId, const QString& messageId);
 
+    // NEW: Edit message
+    void editMessage(const QString& chatId, const QString& messageId, const QString& newText);
+
     void logout();
 
     bool isConnected() const;
@@ -40,6 +43,7 @@ signals:
     void errorOccurred(const QString& msg);
     void newChatCreated(const Chat& chat);
     void messageSeenUpdate(const QString& chatId, const QString& messageId, const QString& userId);
+    void messageUpdated(const QString& chatId, const QString& messageId, const QString& newContent, qint64 editedAt);
 
 private slots:
     void onConnected();
@@ -57,6 +61,7 @@ private:
     void handleUserListUpdate(const QJsonObject& data);
     void handleNewChat(const QJsonObject& data);
     void handleMessageSeenUpdate(const QJsonObject& data);
+    void handleMessageUpdated(const QJsonObject& data);
 };
 
 #endif // WEBSOCKETCLIENT_H

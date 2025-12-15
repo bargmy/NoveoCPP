@@ -32,6 +32,9 @@ struct Message {
 
     // NEW: Seen tracking
     QStringList seenBy;  // List of user IDs who have seen this message
+
+    // NEW: Edit tracking
+    qint64 editedAt = 0;  // Timestamp when edited (0 = not edited)
 };
 
 struct Chat {
