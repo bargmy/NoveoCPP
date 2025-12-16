@@ -123,15 +123,18 @@ QSize UserListDelegate::sizeHint(const QStyleOptionViewItem& option,
 // ==========================================
 class MessageDelegate : public QStyledItemDelegate {
     bool m_isDarkMode = false;
+    MainWindow* m_mainWindow = nullptr;
 public:
-    using QStyledItemDelegate::QStyledItemDelegate;
+    explicit MessageDelegate(MainWindow* mainWindow, QObject* parent = nullptr)
+        : QStyledItemDelegate(parent), m_mainWindow(mainWindow) {
+    }
 
     void setTheme(bool isDarkMode) {
         m_isDarkMode = isDarkMode;
     }
 
     void getBubbleLayout(const QString& text, const QString& sender, bool isMe, int viewWidth,
-        QRect& bubbleRect, QRect& textRect, QRect& nameRect, QRect& avatarRect, int& neededHeight, bool hasReply = false) const {
+        QRect& bubbleRect, QRect& textRect, QRect& nameRect, QRect& avatarRect, int& neededHeight, bool hasReply = false, const QString& replyText = "") const {
         int maxBubbleWidth = viewWidth * 0.75;
         int nameHeight = isMe ? 0 : 18;
         int replyQuoteHeight = hasReply ? 35 : 0;  // NEW: Add space for reply quote
@@ -169,6 +172,17 @@ public:
             totalNameWidth = nameTextW + (hasTag ? (tagW + 8) : 0);
         }
 
+        // NEW: Calculate reply quote width if present
+        int replyQuoteWidth = 0;
+        if (hasReply && !replyText.isEmpty()) {
+            QFont replyFont("Segoe UI", 9);
+            replyFont.setItalic(true);
+            QFontMetrics replyFm(replyFont);
+            // Measure the actual truncated preview text (40 chars max)
+            QString replyPreview = replyText.length() > 40 ? replyText.left(40) + "..." : replyText;
+            replyQuoteWidth = replyFm.horizontalAdvance(replyPreview) + 30; // +30 for bar and padding
+        }
+
         QTextDocument doc;
         doc.setDefaultFont(QFont("Segoe UI", 10));
         doc.setPlainText(text);
@@ -176,7 +190,10 @@ public:
         int textWidth = doc.idealWidth();
         int textHeight = doc.size().height();
 
-        int contentWidth = isMe ? (textWidth + 20) : qMax(textWidth + 20, totalNameWidth + 30);
+        // NEW: Consider reply quote width in bubble width calculation
+        // For incoming messages: max of text, name, and reply width
+        // For outgoing messages: max of text and reply width
+        int contentWidth = isMe ? qMax(textWidth + 20, replyQuoteWidth) : qMax(textWidth + 20, qMax(totalNameWidth + 30, replyQuoteWidth));
         // NEW: Increased minimum width to 100 to fit "vv 12:45 PM" comfortably
         int bubbleW = qMax(contentWidth, 100);
 
@@ -218,7 +235,14 @@ public:
 
         QRect bubbleRect, textRect, nameRect, avatarRect;
         int neededHeight;
-        getBubbleLayout(text, sender, isMe, option.rect.width(), bubbleRect, textRect, nameRect, avatarRect, neededHeight, hasReply);  // NEW: Pass hasReply
+
+        // Get cached reply text from item data (already computed when message was added)
+        QString replyText;
+        if (hasReply) {
+            replyText = index.data(Qt::UserRole + 10).toString();
+        }
+
+        getBubbleLayout(text, sender, isMe, option.rect.width(), bubbleRect, textRect, nameRect, avatarRect, neededHeight, hasReply, replyText);
 
         bubbleRect.translate(0, option.rect.top());
         textRect.translate(0, option.rect.top());
@@ -311,14 +335,12 @@ public:
             painter->setPen(m_isDarkMode ? QColor("#666") : QColor("#ccc"));
             painter->drawLine(replyQuoteX, replyQuoteY, replyQuoteX, replyQuoteY + 28);
 
-            // Reply text preview - look up dynamically
+            // Reply text preview
             QFont replyFont("Segoe UI", 9);
             replyFont.setItalic(true);
             painter->setFont(replyFont);
             painter->setPen(m_isDarkMode ? QColor("#aaa") : QColor("#666"));
 
-            // NEW: Try to get cached reply text first, otherwise indicate it's a reply
-            QString replyText = index.data(Qt::UserRole + 10).toString();
             if (replyText.isEmpty()) {
                 replyText = "[Original message]";  // Fallback text
             }
@@ -451,9 +473,15 @@ public:
         QString replyToId = index.data(Qt::UserRole + 9).toString();  // NEW: Get reply info
         bool hasReply = !replyToId.isEmpty();  // NEW: Check if has reply
 
+        // Get cached reply text from item data
+        QString replyText;
+        if (hasReply) {
+            replyText = index.data(Qt::UserRole + 10).toString();
+        }
+
         QRect b, t, n, a;
         int h;
-        getBubbleLayout(text, sender, isMe, option.rect.width(), b, t, n, a, h, hasReply);  // NEW: Pass hasReply
+        getBubbleLayout(text, sender, isMe, option.rect.width(), b, t, n, a, h, hasReply, replyText);
         return QSize(option.rect.width(), h);
     }
 };
@@ -1210,38 +1238,68 @@ void MainWindow::renderMessages(const QString& chatId) {
 }
 
 QString MainWindow::getReplyPreviewText(const QString& replyToId, const QString& chatId) {
+    qDebug() << "=== GET REPLY PREVIEW ===";
+    qDebug() << "Looking for replyToId:" << replyToId;
+    qDebug() << "In chatId:" << chatId;
+
     QString replyText;
 
-    // First try stored messages
-    if (m_chats.contains(chatId)) {
+    // FIRST: Search visible list items (most reliable, already in UI)
+    qDebug() << "Searching list items first. Count:" << m_chatList->count();
+    for (int i = 0; i < m_chatList->count(); i++) {
+        QListWidgetItem* listItem = m_chatList->item(i);
+        QString itemMsgId = listItem->data(Qt::UserRole + 6).toString();
+        if (itemMsgId == replyToId) {
+            replyText = listItem->data(Qt::UserRole + 1).toString();
+            qDebug() << "Found in list item" << i << "! Text:" << replyText;
+            break;
+        }
+    }
+
+    // FALLBACK: Try stored messages if not found in list
+    if (replyText.isEmpty() && m_chats.contains(chatId)) {
+        qDebug() << "Not found in list, searching m_chats with" << m_chats[chatId].messages.size() << "messages";
         for (const auto& m : m_chats[chatId].messages) {
             if (m.messageId == replyToId) {
                 replyText = m.text;
+                qDebug() << "Found in m_chats! Text:" << replyText;
                 break;
             }
         }
     }
 
-    // If not found, search visible list items
-    if (replyText.isEmpty()) {
-        for (int i = 0; i < m_chatList->count(); i++) {
-            QListWidgetItem* listItem = m_chatList->item(i);
-            if (listItem->data(Qt::UserRole + 6).toString() == replyToId) {
-                replyText = listItem->data(Qt::UserRole + 1).toString();
-                break;
+    qDebug() << "Before cleanup, replyText:" << replyText;
+
+    // Safety cleanup for old cached messages with raw URLs
+    if (!replyText.isEmpty()) {
+        QString trimmed = replyText.trimmed();
+        qDebug() << "Trimmed text:" << trimmed;
+        qDebug() << "Starts with http?" << trimmed.startsWith("http");
+        qDebug() << "Contains space?" << trimmed.contains(" ");
+
+        // If the ENTIRE message is just a raw URL (no spaces = no caption)
+        if (trimmed.startsWith("http") && !trimmed.contains(" ")) {
+            qDebug() << "Detected URL-only message";
+            if (trimmed.contains("/static/upload") || trimmed.contains("/static/upl")) {
+                qDebug() << "Contains /static/upload, replacing with [Image]";
+                replyText = "[Image]";
             }
         }
-    }
-
-    // FINAL FALLBACK: Clean up URLs from old cached messages
-    if (!replyText.isEmpty() && replyText.startsWith("https://") && replyText.contains("/static/upl")) {
-        replyText = "[Image]";
+        // Also clean up old [FILE:...] format
+        else if (trimmed.startsWith("[FILE:") && trimmed.endsWith("]")) {
+            qDebug() << "Detected [FILE:...] format, replacing with [Image]";
+            replyText = "[Image]";
+        }
     }
 
     // If still empty, show fallback
     if (replyText.isEmpty()) {
+        qDebug() << "Still empty, using fallback";
         replyText = "[Original message]";
     }
+
+    qDebug() << "Final replyText:" << replyText;
+    qDebug() << "=== END GET REPLY PREVIEW ===";
 
     return replyText;
 }
@@ -1584,13 +1642,48 @@ void MainWindow::onDeleteMessage() {
 
     QString messageId = menu->property("messageId").toString();
 
-    // Show confirmation dialog
-    QMessageBox::StandardButton reply;
-    reply = QMessageBox::question(this, "Delete Message",
-        "Are you sure you want to delete this message?",
-        QMessageBox::Yes | QMessageBox::No);
+    // Show confirmation dialog with theme-appropriate styling
+    QMessageBox msgBox(this);
+    msgBox.setWindowTitle("Delete Message");
+    msgBox.setText("Are you sure you want to delete this message?");
+    msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+    msgBox.setDefaultButton(QMessageBox::No);
 
-    if (reply == QMessageBox::Yes) {
+    // Apply theme-appropriate styling
+    if (m_isDarkMode) {
+        msgBox.setStyleSheet(
+            "QMessageBox { background-color: #2b2b2b; }"
+            "QLabel { color: #ffffff; }"
+            "QPushButton { "
+            "   background-color: #3b3b3b; "
+            "   color: #ffffff; "
+            "   border: 1px solid #555555; "
+            "   border-radius: 4px; "
+            "   padding: 6px 16px; "
+            "   min-width: 60px; "
+            "}"
+            "QPushButton:hover { background-color: #4a4a4a; }"
+            "QPushButton:pressed { background-color: #333333; }"
+        );
+    }
+    else {
+        msgBox.setStyleSheet(
+            "QMessageBox { background-color: #ffffff; }"
+            "QLabel { color: #000000; }"
+            "QPushButton { "
+            "   background-color: #f0f0f0; "
+            "   color: #000000; "
+            "   border: 1px solid #cccccc; "
+            "   border-radius: 4px; "
+            "   padding: 6px 16px; "
+            "   min-width: 60px; "
+            "}"
+            "QPushButton:hover { background-color: #e0e0e0; }"
+            "QPushButton:pressed { background-color: #d0d0d0; }"
+        );
+    }
+
+    if (msgBox.exec() == QMessageBox::Yes) {
         // Send delete request to server
         if (m_client && !m_currentChatId.isEmpty()) {
             m_client->deleteMessage(m_currentChatId, messageId);

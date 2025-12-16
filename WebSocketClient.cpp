@@ -180,13 +180,22 @@ void WebSocketClient::handleChatHistory(const QJsonObject& data) {
                 // NEW: Check if this is a file message
                 if (contentObj.contains("file") && !contentObj["file"].isNull()) {
                     // This is a file/image message
-                    QJsonObject fileObj = contentObj["file"].toObject();
-                    QString fileName = fileObj["name"].toString();
-                    if (!fileName.isEmpty()) {
-                        msg.text = "[" + fileName + "]";  // Show [filename]
+                    QString captionText = contentObj["text"].toString();
+
+                    if (!captionText.isEmpty()) {
+                        // Has both file and caption - show caption + [image] indicator
+                        msg.text = captionText + " [Image]";
                     }
                     else {
-                        msg.text = "[File]";  // Fallback
+                        // File only, no caption
+                        QJsonObject fileObj = contentObj["file"].toObject();
+                        QString fileName = fileObj["name"].toString();
+                        if (!fileName.isEmpty()) {
+                            msg.text = "[" + fileName + "]";  // Show [filename]
+                        }
+                        else {
+                            msg.text = "[Image]";  // Fallback
+                        }
                     }
                 }
                 else {
@@ -239,13 +248,22 @@ void WebSocketClient::handleMessage(const QJsonObject& mObj) {
     // Check if this is a file message
     if (contentObj.contains("file") && !contentObj["file"].isNull()) {
         // This is a file/image message
-        QJsonObject fileObj = contentObj["file"].toObject();
-        QString fileName = fileObj["name"].toString();
-        if (!fileName.isEmpty()) {
-            msg.text = "[" + fileName + "]";
+        QString captionText = contentObj["text"].toString();
+
+        if (!captionText.isEmpty()) {
+            // Has both file and caption - show caption + [image] indicator
+            msg.text = captionText + " [Image]";
         }
         else {
-            msg.text = "[File]";
+            // File only, no caption
+            QJsonObject fileObj = contentObj["file"].toObject();
+            QString fileName = fileObj["name"].toString();
+            if (!fileName.isEmpty()) {
+                msg.text = "[" + fileName + "]";
+            }
+            else {
+                msg.text = "[Image]";
+            }
         }
     }
     else {

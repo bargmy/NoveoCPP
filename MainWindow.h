@@ -41,6 +41,9 @@ public:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow();
 
+    // NEW: Helper to get clean reply preview text (public for MessageDelegate)
+    QString getReplyPreviewText(const QString& replyToId, const QString& chatId);
+
 protected:
     void resizeEvent(QResizeEvent* event) override;
 
@@ -79,8 +82,6 @@ private:
     void setupUi();
     void applyTheme();
 
-    // NEW: Helper to get clean reply preview text
-    QString getReplyPreviewText(const QString& replyToId, const QString& chatId);
     void renderMessages(const QString& chatId);
     void addMessageBubble(const Message& msg, bool appendStretch, bool animate);
 
