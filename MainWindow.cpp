@@ -1,4 +1,4 @@
-﻿#include "MainWindow.h"
+#include "MainWindow.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -137,7 +137,7 @@ public:
         QRect& bubbleRect, QRect& textRect, QRect& nameRect, QRect& avatarRect, int& neededHeight, bool hasReply = false, const QString& replyText = "") const {
         int maxBubbleWidth = viewWidth * 0.75;
         int nameHeight = isMe ? 0 : 18;
-        int replyQuoteHeight = hasReply ? 35 : 0;  // NEW: Add space for reply quote
+        int replyQuoteHeight = hasReply ? 48 : 0;  // NEW: Add space for reply quote (sender name + text + padding)
         int timeHeight = 12;
         int bubblePadding = 16;
         int avatarSize = 38;
@@ -320,6 +320,9 @@ public:
         // NEW: Draw reply quote if this is a reply
         // The space is already allocated in getBubbleLayout via replyQuoteHeight
         if (!replyToId.isEmpty()) {
+            // Get reply sender name
+            QString replySenderName = index.data(Qt::UserRole + 11).toString();
+
             // Calculate reply quote position (should be right after nameRect for others, or at top for me)
             int replyQuoteY;
             if (!isMe) {
@@ -331,9 +334,20 @@ public:
 
             int replyQuoteX = bubbleRect.left() + 10;
 
+            // Draw sender name at the top
+            if (!replySenderName.isEmpty()) {
+                QFont senderFont("Segoe UI", 9);
+                senderFont.setBold(true);
+                painter->setFont(senderFont);
+                painter->setPen(m_isDarkMode ? QColor("#60A5FA") : QColor("#2563EB"));  // Blue color
+                QFontMetrics senderFm(senderFont);
+                painter->drawText(replyQuoteX + 6, replyQuoteY + senderFm.ascent(), replySenderName);
+                replyQuoteY += senderFm.height() + 2;  // Move down for the quote bar and text
+            }
+
             // Draw reply bar (vertical line)
             painter->setPen(m_isDarkMode ? QColor("#666") : QColor("#ccc"));
-            painter->drawLine(replyQuoteX, replyQuoteY, replyQuoteX, replyQuoteY + 28);
+            painter->drawLine(replyQuoteX, replyQuoteY, replyQuoteX, replyQuoteY + 20);
 
             // Reply text preview
             QFont replyFont("Segoe UI", 9);
@@ -344,9 +358,11 @@ public:
             if (replyText.isEmpty()) {
                 replyText = "[Original message]";  // Fallback text
             }
+
+            // getReplyPreviewText() already handles URL cleanup, so just display it
             QString replyPreview = replyText.length() > 40 ? replyText.left(40) + "..." : replyText;
             QFontMetrics replyFm(replyFont);
-            painter->drawText(replyQuoteX + 6, replyQuoteY + replyFm.ascent() + 8, replyPreview);
+            painter->drawText(replyQuoteX + 6, replyQuoteY + replyFm.ascent() + 2, replyPreview);
         }
 
         painter->setPen(textColor);
@@ -1249,15 +1265,20 @@ QString MainWindow::getReplyPreviewText(const QString& replyToId, const QString&
     for (int i = 0; i < m_chatList->count(); i++) {
         QListWidgetItem* listItem = m_chatList->item(i);
         QString itemMsgId = listItem->data(Qt::UserRole + 6).toString();
+        QString itemText = listItem->data(Qt::UserRole + 1).toString();
+
+        // Debug: Show ALL items
+        qDebug() << "  Item" << i << "- MsgId:" << itemMsgId << "Text:" << itemText.left(50);
+
         if (itemMsgId == replyToId) {
-            replyText = listItem->data(Qt::UserRole + 1).toString();
-            qDebug() << "Found in list item" << i << "! Text:" << replyText;
+            replyText = itemText;
+            qDebug() << "*** FOUND in list item" << i << "! Full text:" << replyText;
             break;
         }
     }
 
     // FALLBACK: Try stored messages if not found in list
-    if (replyText.isEmpty() && m_chats.contains(chatId)) {
+    if (replyText.isEmpty() && !chatId.isEmpty() && m_chats.contains(chatId)) {
         qDebug() << "Not found in list, searching m_chats with" << m_chats[chatId].messages.size() << "messages";
         for (const auto& m : m_chats[chatId].messages) {
             if (m.messageId == replyToId) {
@@ -1277,12 +1298,23 @@ QString MainWindow::getReplyPreviewText(const QString& replyToId, const QString&
         qDebug() << "Starts with http?" << trimmed.startsWith("http");
         qDebug() << "Contains space?" << trimmed.contains(" ");
 
-        // If the ENTIRE message is just a raw URL (no spaces = no caption)
-        if (trimmed.startsWith("http") && !trimmed.contains(" ")) {
-            qDebug() << "Detected URL-only message";
-            if (trimmed.contains("/static/upload") || trimmed.contains("/static/upl")) {
-                qDebug() << "Contains /static/upload, replacing with [Image]";
+        // Check if it's JUST a raw URL (handles URLs with or without spaces/newlines)
+        bool isJustURL = trimmed.startsWith("http") &&
+            (trimmed.contains("/static/upload") || trimmed.contains("/static/upl"));
+
+        // If it starts with http and contains our upload path, it's an old unformatted message
+        if (isJustURL) {
+            // Count actual words (not just whitespace)
+            QStringList words = trimmed.split(QRegExp("\\s+"), QString::SkipEmptyParts);
+            // If there's only 1 "word" (the URL itself), replace it
+            if (words.size() == 1) {
+                qDebug() << "Detected URL-only message, replacing with [Image]";
                 replyText = "[Image]";
+            }
+            // If there are multiple words, it might be "caption URL" format
+            else if (words.size() == 2 && words.last().startsWith("http")) {
+                qDebug() << "Detected caption+URL format, extracting caption:" << words.first();
+                replyText = words.first() + " [Image]";
             }
         }
         // Also clean up old [FILE:...] format
@@ -1317,8 +1349,44 @@ void MainWindow::addMessageBubble(const Message& msg, bool appendStretch, bool a
         avatarUrl = m_users[msg.senderId].avatarUrl;
     }
 
+    // Format message text to replace raw URLs with [Image] or [filename]
+    QString displayText = msg.text;
+    QString trimmed = displayText.trimmed();
+
+    // Check if message is just a URL
+    if (trimmed.startsWith("http") && (trimmed.contains("/static/upload") || trimmed.contains("/static/upl"))) {
+        QStringList words = trimmed.split(QRegExp("\\s+"), QString::SkipEmptyParts);
+
+        // URL only (no caption)
+        if (words.size() == 1) {
+            // Check if it's a file attachment (has a filename in the URL)
+            if (trimmed.contains(".")) {
+                // Extract filename from URL
+                QStringList parts = trimmed.split("/");
+                QString filename = parts.last();
+                // Check if filename has an extension (not just .png/jpg which is image)
+                if (filename.contains(".") &&
+                    !filename.endsWith(".png") && !filename.endsWith(".jpg") &&
+                    !filename.endsWith(".jpeg") && !filename.endsWith(".gif") &&
+                    !filename.endsWith(".webp")) {
+                    displayText = "[" + filename + "]";
+                }
+                else {
+                    displayText = "[Image]";
+                }
+            }
+            else {
+                displayText = "[Image]";
+            }
+        }
+        // Caption + URL
+        else if (words.size() == 2 && words.last().startsWith("http")) {
+            displayText = words.first() + " [Image]";
+        }
+    }
+
     QListWidgetItem* item = new QListWidgetItem(m_chatList);
-    item->setData(Qt::UserRole + 1, msg.text);
+    item->setData(Qt::UserRole + 1, displayText);
     item->setData(Qt::UserRole + 2, senderName);
     item->setData(Qt::UserRole + 3, msg.timestamp);
     item->setData(Qt::UserRole + 4, isMe);
@@ -1332,6 +1400,19 @@ void MainWindow::addMessageBubble(const Message& msg, bool appendStretch, bool a
     if (!msg.replyToId.isEmpty()) {
         QString replyText = getReplyPreviewText(msg.replyToId, msg.chatId);
         item->setData(Qt::UserRole + 10, replyText);
+
+        // Also store the sender name of the message being replied to
+        QString replySenderName = "";
+        // Search for the original message to get sender name
+        for (int i = 0; i < m_chatList->count(); i++) {
+            QListWidgetItem* listItem = m_chatList->item(i);
+            QString itemMsgId = listItem->data(Qt::UserRole + 6).toString();
+            if (itemMsgId == msg.replyToId) {
+                replySenderName = listItem->data(Qt::UserRole + 2).toString();
+                break;
+            }
+        }
+        item->setData(Qt::UserRole + 11, replySenderName);
     }
 
     if (!isMe) {
@@ -1359,8 +1440,44 @@ void MainWindow::prependMessageBubble(const Message& msg) {
         avatarUrl = m_users[msg.senderId].avatarUrl;
     }
 
+    // Format message text to replace raw URLs with [Image] or [filename]
+    QString displayText = msg.text;
+    QString trimmed = displayText.trimmed();
+
+    // Check if message is just a URL
+    if (trimmed.startsWith("http") && (trimmed.contains("/static/upload") || trimmed.contains("/static/upl"))) {
+        QStringList words = trimmed.split(QRegExp("\\s+"), QString::SkipEmptyParts);
+
+        // URL only (no caption)
+        if (words.size() == 1) {
+            // Check if it's a file attachment (has a filename in the URL)
+            if (trimmed.contains(".")) {
+                // Extract filename from URL
+                QStringList parts = trimmed.split("/");
+                QString filename = parts.last();
+                // Check if filename has an extension (not just .png/jpg which is image)
+                if (filename.contains(".") &&
+                    !filename.endsWith(".png") && !filename.endsWith(".jpg") &&
+                    !filename.endsWith(".jpeg") && !filename.endsWith(".gif") &&
+                    !filename.endsWith(".webp")) {
+                    displayText = "[" + filename + "]";
+                }
+                else {
+                    displayText = "[Image]";
+                }
+            }
+            else {
+                displayText = "[Image]";
+            }
+        }
+        // Caption + URL
+        else if (words.size() == 2 && words.last().startsWith("http")) {
+            displayText = words.first() + " [Image]";
+        }
+    }
+
     QListWidgetItem* item = new QListWidgetItem();
-    item->setData(Qt::UserRole + 1, msg.text);
+    item->setData(Qt::UserRole + 1, displayText);
     item->setData(Qt::UserRole + 2, senderName);
     item->setData(Qt::UserRole + 3, msg.timestamp);
     item->setData(Qt::UserRole + 4, isMe);
@@ -1374,6 +1491,19 @@ void MainWindow::prependMessageBubble(const Message& msg) {
     if (!msg.replyToId.isEmpty()) {
         QString replyText = getReplyPreviewText(msg.replyToId, msg.chatId);
         item->setData(Qt::UserRole + 10, replyText);
+
+        // Also store the sender name of the message being replied to
+        QString replySenderName = "";
+        // Search for the original message to get sender name
+        for (int i = 0; i < m_chatList->count(); i++) {
+            QListWidgetItem* listItem = m_chatList->item(i);
+            QString itemMsgId = listItem->data(Qt::UserRole + 6).toString();
+            if (itemMsgId == msg.replyToId) {
+                replySenderName = listItem->data(Qt::UserRole + 2).toString();
+                break;
+            }
+        }
+        item->setData(Qt::UserRole + 11, replySenderName);
     }
 
     if (!isMe) {
