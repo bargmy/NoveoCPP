@@ -16,10 +16,16 @@
 #include <QSet>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
+#include <QTabWidget>
+#include <QCheckBox>
+#include <QSystemTrayIcon>
+#include <QMenu>
+#include <QCloseEvent>
 
 #include "WebSocketClient.h"
 #include "DataStructures.h"
 
+// Delegate for chat/user list on the left
 class UserListDelegate : public QStyledItemDelegate {
     Q_OBJECT
 public:
@@ -45,6 +51,7 @@ public:
 
 protected:
     void resizeEvent(QResizeEvent* event) override;
+    void closeEvent(QCloseEvent* event) override;   // NEW: minimize to tray
 
 private slots:
     void onConnected();
@@ -58,12 +65,15 @@ private slots:
 
     void onSendBtnClicked();
     void onNewChatCreated(const Chat& chat);
-    void onMessageSeenUpdate(const QString& chatId, const QString& messageId, const QString& userId);
+    void onMessageSeenUpdate(const QString& chatId,
+                             const QString& messageId,
+                             const QString& userId);
 
     void onChatSelected(QListWidgetItem* item);
     void onContactSelected(QListWidgetItem* item);
 
     void onDarkModeToggled(bool checked);
+    void onNotificationsToggled(bool checked);      // NEW: notifications setting
     void onLogoutClicked();
 
     // Context menu slots
@@ -74,19 +84,29 @@ private slots:
     void onForwardMessage();
     void onCancelEdit();
     void onCancelReply();
-
-    void onMessageUpdated(const QString& chatId, const QString& messageId, const QString& newContent, qint64 editedAt);
+    void onMessageUpdated(const QString& chatId,
+                          const QString& messageId,
+                          const QString& newContent,
+                          qint64 editedAt);
     void onMessageDeleted(const QString& chatId, const QString& messageId);
 
     // Scroll detection
     void onScrollValueChanged(int value);
 
-    // NEW: Click on replied message => focus original
+    // Click on replied message => focus original
     void onChatMessageClicked(QListWidgetItem* item);
+
+    // Tray icon handlers (NEW)
+    void onTrayIconActivated(QSystemTrayIcon::ActivationReason reason);
+    void onTrayShowHide();
+    void onTrayQuit();
 
 private:
     void setupUi();
     void applyTheme();
+
+    void setupTrayIcon();                         // NEW: tray creation
+    void showNotificationForMessage(const Message& msg); // NEW: notifications
 
     void renderMessages(const QString& chatId);
     void addMessageBubble(const Message& msg, bool appendStretch, bool animate);
@@ -107,8 +127,8 @@ private:
     void updateMessageStatus(const QString& messageId, MessageStatus newStatus);
     MessageStatus calculateMessageStatus(const Message& msg, const Chat& chat);
 
-    // NEW: Focus + highlight helpers
-    void focusMessageById(const QString& messageId);
+    // Focus + highlight helpers
+    void focusOnMessage(const QString& messageId);
     void clearAllMessageHighlights();
 
 private:
@@ -117,6 +137,7 @@ private:
 
     // UI Elements
     QStackedWidget* m_stackedWidget = nullptr;
+
     QWidget* m_loginPage = nullptr;
     QWidget* m_appPage = nullptr;
 
@@ -133,7 +154,6 @@ private:
     QWidget* m_chatAreaWidget = nullptr;
     QLabel* m_chatTitle = nullptr;
     QListWidget* m_chatList = nullptr;
-
     QLineEdit* m_messageInput = nullptr;
     QPushButton* m_sendBtn = nullptr;
 
@@ -147,11 +167,18 @@ private:
     QLabel* m_replyLabel = nullptr;
     QPushButton* m_cancelReplyBtn = nullptr;
 
+    // Settings UI
+    QCheckBox* m_darkModeCheck = nullptr;
+    QCheckBox* m_notificationsCheck = nullptr;     // NEW: notifications checkbox
+
     // Data
-    QMap<QString, User> m_users;
-    QMap<QString, Chat> m_chats;
-    QString m_currentChatId;
+    QMap<QString, User>  m_users;
+    QMap<QString, Chat>  m_chats;
+    QString              m_currentChatId;
+
     bool m_isDarkMode = false;
+    bool m_notificationsEnabled = true;            // NEW: notifications flag
+    bool m_isLoadingHistory = false;
 
     // Pending message tracking for optimistic sends
     QMap<QString, Message> m_pendingMessages;
@@ -165,11 +192,15 @@ private:
     QString m_replyingToText;
     QString m_replyingToSender;
 
-    bool m_isLoadingHistory = false;
-
     // Avatar Cache
     QMap<QString, QPixmap> m_avatarCache;
-    QSet<QString> m_pendingDownloads;
+    QSet<QString>          m_pendingDownloads;
+
+    // Tray icon (NEW)
+    QSystemTrayIcon* m_trayIcon = nullptr;
+    QMenu*           m_trayMenu = nullptr;
+    QAction*         m_trayShowHideAction = nullptr;
+    QAction*         m_trayQuitAction = nullptr;
 };
 
 #endif // MAINWINDOW_H
