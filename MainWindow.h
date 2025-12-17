@@ -76,7 +76,7 @@ private slots:
     void onDarkModeToggled(bool checked);
     void onLogoutClicked();
 
-    // NEW: Notifications setting
+    // Notifications setting
     void onNotificationsToggled(bool checked);
 
     // Context menu slots
@@ -164,7 +164,7 @@ private:
     QWidget* m_replyBar = nullptr;
     QLabel* m_replyLabel = nullptr;
     QPushButton* m_cancelReplyBtn = nullptr;
-    
+
     // Checkbox for notifications
     QCheckBox* m_notificationsCheck = nullptr;
 
@@ -172,8 +172,9 @@ private:
     QMap<QString, User> m_users;
     QMap<QString, Chat> m_chats;
     QString m_currentChatId;
+
     bool m_isDarkMode = false;
-    
+
     // Notification state
     bool m_notificationsEnabled = true;
 

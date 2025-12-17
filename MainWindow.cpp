@@ -47,7 +47,8 @@ void UserListDelegate::paint(QPainter* painter,
     option.widget->style()->drawPrimitive(QStyle::PE_PanelItemViewItem, &opt, painter, option.widget);
 
     QString fullText = index.data(Qt::DisplayRole).toString();
-    QIcon icon = qvariant_cast(index.data(Qt::DecorationRole));
+    // FIX: Replaced qvariant_cast with value<QIcon>()
+    QIcon icon = index.data(Qt::DecorationRole).value<QIcon>();
     QRect rect = opt.rect;
 
     const int padding = 10;
@@ -58,7 +59,7 @@ void UserListDelegate::paint(QPainter* painter,
         icon.paint(painter, rect.left() + padding, iconY, iconSize, iconSize);
     }
 
-    static QRegularExpression regex("^(.*)\\s\\[#([a-fA-F0-9]{6}),\\s*\"(.*)\"\\]$");
+    static QRegularExpression regex("^(.*)\\s\\[#([a-fA-F0-9]{6}),\\s*\\\"(.*)\\\"\\]$");
     QRegularExpressionMatch match = regex.match(fullText);
 
     QString name = fullText;
@@ -148,7 +149,7 @@ public:
         int avatarGap = 10;
         int sideMargin = 10;
 
-        static QRegularExpression regex("^(.*)\\s\\[#([a-fA-F0-9]{6}),\\s*\"(.*)\"\\]$");
+        static QRegularExpression regex("^(.*)\\s\\[#([a-fA-F0-9]{6}),\\s*\\\"(.*)\\\"\\]$");
         QRegularExpressionMatch match = regex.match(sender);
 
         QString displayName = sender;
@@ -239,7 +240,8 @@ public:
         QString sender = index.data(Qt::UserRole + 2).toString();
         qint64 timestamp = index.data(Qt::UserRole + 3).toLongLong();
         bool isMe = index.data(Qt::UserRole + 4).toBool();
-        QIcon avatar = qvariant_cast(index.data(Qt::DecorationRole));
+        // FIX: Replaced qvariant_cast with value<QIcon>()
+        QIcon avatar = index.data(Qt::DecorationRole).value<QIcon>();
         QString replyToId = index.data(Qt::UserRole + 9).toString();
         QString messageId = index.data(Qt::UserRole + 6).toString();
         bool hasReply = !replyToId.isEmpty();
@@ -297,7 +299,7 @@ public:
         painter->drawRoundedRect(bubbleRect, 12, 12);
 
         if (!isMe) {
-            static QRegularExpression regex("^(.*)\\s\\[#([a-fA-F0-9]{6}),\\s*\"(.*)\"\\]$");
+            static QRegularExpression regex("^(.*)\\s\\[#([a-fA-F0-9]{6}),\\s*\\\"(.*)\\\"\\]$");
             QRegularExpressionMatch match = regex.match(sender);
             QString displayName = sender;
             QString tagText;
@@ -1981,3 +1983,5 @@ void MainWindow::onNotificationsToggled(bool checked)
     QSettings settings("Noveo", "MessengerClient");
     settings.setValue("notificationsEnabled", m_notificationsEnabled);
 }
+
+
