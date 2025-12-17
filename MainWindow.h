@@ -51,7 +51,7 @@ public:
 
 protected:
     void resizeEvent(QResizeEvent* event) override;
-    void closeEvent(QCloseEvent* event) override;   // NEW: minimize to tray
+    void closeEvent(QCloseEvent* event) override;
 
 private slots:
     void onConnected();
@@ -73,7 +73,7 @@ private slots:
     void onContactSelected(QListWidgetItem* item);
 
     void onDarkModeToggled(bool checked);
-    void onNotificationsToggled(bool checked);      // NEW: notifications setting
+    void onNotificationsToggled(bool checked);
     void onLogoutClicked();
 
     // Context menu slots
@@ -96,7 +96,7 @@ private slots:
     // Click on replied message => focus original
     void onChatMessageClicked(QListWidgetItem* item);
 
-    // Tray icon handlers (NEW)
+    // Tray icon handlers
     void onTrayIconActivated(QSystemTrayIcon::ActivationReason reason);
     void onTrayShowHide();
     void onTrayQuit();
@@ -105,8 +105,8 @@ private:
     void setupUi();
     void applyTheme();
 
-    void setupTrayIcon();                         // NEW: tray creation
-    void showNotificationForMessage(const Message& msg); // NEW: notifications
+    void setupTrayIcon();
+    void showNotificationForMessage(const Message& msg);
 
     void renderMessages(const QString& chatId);
     void addMessageBubble(const Message& msg, bool appendStretch, bool animate);
@@ -169,7 +169,7 @@ private:
 
     // Settings UI
     QCheckBox* m_darkModeCheck = nullptr;
-    QCheckBox* m_notificationsCheck = nullptr;     // NEW: notifications checkbox
+    QCheckBox* m_notificationsCheck = nullptr;
 
     // Data
     QMap<QString, User>  m_users;
@@ -177,7 +177,7 @@ private:
     QString              m_currentChatId;
 
     bool m_isDarkMode = false;
-    bool m_notificationsEnabled = true;            // NEW: notifications flag
+    bool m_notificationsEnabled = true;
     bool m_isLoadingHistory = false;
 
     // Pending message tracking for optimistic sends
@@ -191,12 +191,15 @@ private:
     QString m_replyingToMessageId;
     QString m_replyingToText;
     QString m_replyingToSender;
+    
+    // Highlight state
+    QString m_highlightedMessageId; // ADDED THIS
 
     // Avatar Cache
     QMap<QString, QPixmap> m_avatarCache;
     QSet<QString>          m_pendingDownloads;
 
-    // Tray icon (NEW)
+    // Tray icon
     QSystemTrayIcon* m_trayIcon = nullptr;
     QMenu*           m_trayMenu = nullptr;
     QAction*         m_trayShowHideAction = nullptr;

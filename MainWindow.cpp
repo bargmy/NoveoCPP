@@ -138,7 +138,6 @@ public:
         m_highlightedMessageId = messageId;
     }
 
-    // Layout and painting are simplified but keep basic bubble look
     void getBubbleLayout(const QString& text,
                          const QString& sender,
                          bool isMe,
@@ -322,7 +321,6 @@ public:
         Q_UNUSED(option);
         Q_UNUSED(index);
         Q_UNUSED(event);
-        // Could be extended to detect clicks on reply preview, etc.
         return QStyledItemDelegate::editorEvent(event, model, option, index);
     }
 };
@@ -340,7 +338,7 @@ MainWindow::MainWindow(QWidget* parent)
 
     setupUi();
     applyTheme();
-    setupTrayIcon();               // NEW: tray icon
+    setupTrayIcon();
 
     if (settings.contains("username")) {
         m_usernameInput->setText(settings.value("username").toString());
@@ -457,7 +455,6 @@ void MainWindow::setupUi() {
                 this, &MainWindow::onDarkModeToggled);
         settingsLayout->addWidget(m_darkModeCheck);
 
-        // NEW: Notifications checkbox
         m_notificationsCheck = new QCheckBox("Enable notifications");
         m_notificationsCheck->setChecked(m_notificationsEnabled);
         connect(m_notificationsCheck, &QCheckBox::toggled,
@@ -705,7 +702,6 @@ void MainWindow::showNotificationForMessage(const Message& msg) {
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
-    // Minimize to tray instead of exiting (if tray available)
     if (m_trayIcon && m_trayIcon->isVisible()) {
         hide();
         event->ignore();
@@ -849,7 +845,6 @@ void MainWindow::onUserListUpdated(const std::vector<User>& users) {
         item->setIcon(getAvatar(u.username, fullUrl));
     }
 
-    // Refresh existing chat list item titles/icons
     for (int i = 0; i < m_chatListWidget->count(); ++i) {
         QListWidgetItem* item = m_chatListWidget->item(i);
         QString chatId = item->data(Qt::UserRole).toString();
@@ -942,6 +937,7 @@ void MainWindow::onChatHistoryReceived(const std::vector<Chat>& incomingChats) {
             item->setData(Qt::UserRole, chat.chatId);
             item->setData(AvatarUrlRole, url);
             item->setIcon(getAvatar(name, url));
+            m_chatListWidget->addItem(item);
         }
     }
 }
@@ -1062,8 +1058,12 @@ QIcon MainWindow::getAvatar(const QString& name, const QString& urlIn) {
 
     if (!m_pendingDownloads.contains(fullUrl)) {
         m_pendingDownloads.insert(fullUrl);
-        QNetworkRequest request(QUrl(fullUrl));
+        
+        // FIXED LINE BELOW: used separate setUrl to avoid parsing ambiguity
+        QNetworkRequest request;
+        request.setUrl(QUrl(fullUrl));
         request.setTransferTimeout(60000);
+        
         QNetworkReply* reply = m_nam->get(request);
         connect(reply, &QNetworkReply::finished,
                 this, [this, reply, fullUrl]() {
@@ -1218,7 +1218,6 @@ QString MainWindow::getReplyPreviewText(const QString& replyToId,
                                         const QString& chatId) {
     Q_UNUSED(chatId);
     Q_UNUSED(replyToId);
-    // Simplified stub: can be extended to search text in messages
     return QStringLiteral("Original message");
 }
 
@@ -1385,7 +1384,6 @@ void MainWindow::onMessageReceived(const Message& msg) {
         m_pendingMessages.remove(pendingIdToRemove);
     }
 
-    // NEW: show tray notification for new incoming message
     showNotificationForMessage(msg);
 }
 
