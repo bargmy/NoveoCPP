@@ -46,15 +46,15 @@ public:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow();
 
-    // Used by MessageDelegate for reply previews + click-to-focus
+    // Helper to get clean reply preview text (public for MessageDelegate)
     QString getReplyPreviewText(const QString& replyToId, const QString& chatId);
 
-    // Called by MessageDelegate when user clicks the reply preview
+    // Focus helper
     void focusOnMessage(const QString& messageId);
 
 protected:
     void resizeEvent(QResizeEvent* event) override;
-    void closeEvent(QCloseEvent* event) override; // tray support
+    void closeEvent(QCloseEvent* event) override;
 
 private slots:
     void onConnected();
@@ -94,7 +94,7 @@ private slots:
     // Scroll detection
     void onScrollValueChanged(int value);
 
-    // Exists in your cpp (clicked signal)
+    // Click on replied message => focus original
     void onChatListItemClicked(const QModelIndex& index);
 
     // Tray handlers
@@ -164,8 +164,8 @@ private:
     QWidget* m_replyBar = nullptr;
     QLabel* m_replyLabel = nullptr;
     QPushButton* m_cancelReplyBtn = nullptr;
-
-    // NEW: settings checkbox pointer (so it doesn't get lost)
+    
+    // Checkbox for notifications
     QCheckBox* m_notificationsCheck = nullptr;
 
     // Data
@@ -173,11 +173,11 @@ private:
     QMap<QString, Chat> m_chats;
     QString m_currentChatId;
     bool m_isDarkMode = false;
-
-    // NEW: notifications enabled
+    
+    // Notification state
     bool m_notificationsEnabled = true;
 
-    // Used by focusOnMessage highlight logic in your cpp
+    // Highlight state
     QString m_highlightedMessageId;
 
     // Pending message tracking for optimistic sends
