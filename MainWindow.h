@@ -41,7 +41,6 @@ public:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow();
 
-    // NEW: Helper to get clean reply preview text (public for MessageDelegate)
     QString getReplyPreviewText(const QString& replyToId, const QString& chatId);
 
 protected:
@@ -64,7 +63,6 @@ private slots:
     void onDarkModeToggled(bool checked);
     void onLogoutClicked();
 
-    // NEW: Context menu slots
     void onChatListContextMenu(const QPoint& pos);
     void onEditMessage();
     void onDeleteMessage();
@@ -75,8 +73,8 @@ private slots:
     void onMessageUpdated(const QString& chatId, const QString& messageId, const QString& newContent, qint64 editedAt);
     void onMessageDeleted(const QString& chatId, const QString& messageId);
 
-    // NEW: Slot for scroll detection
     void onScrollValueChanged(int value);
+    void onChatListItemClicked(const QModelIndex& index);
 
 private:
     void setupUi();
@@ -84,14 +82,11 @@ private:
 
     void renderMessages(const QString& chatId);
     void addMessageBubble(const Message& msg, bool appendStretch, bool animate);
-
-    // NEW: Prepend function for older messages
     void prependMessageBubble(const Message& msg);
 
     QString resolveChatName(const Chat& chat);
     QColor getColorForName(const QString& name);
 
-    // Avatar handling
     QIcon getAvatar(const QString& name, const QString& url);
     QIcon generateGenericAvatar(const QString& name);
     void updateAvatarOnItems(const QString& url, const QPixmap& pixmap);
@@ -100,16 +95,13 @@ private:
     void smoothScrollToBottom();
     bool isScrolledToBottom() const;
 
-    // NEW: Update message status in UI
     void updateMessageStatus(const QString& messageId, MessageStatus newStatus);
-
-    // NEW: Calculate message status based on seenBy list
     MessageStatus calculateMessageStatus(const Message& msg, const Chat& chat);
+    void focusOnMessage(const QString& messageId);
 
     WebSocketClient* m_client;
     QNetworkAccessManager* m_nam;
 
-    // UI Elements
     QStackedWidget* m_stackedWidget;
     QWidget* m_loginPage;
     QWidget* m_appPage;
@@ -124,45 +116,38 @@ private:
     QWidget* m_settingsTab;
     QWidget* m_chatAreaWidget;
     QLabel* m_chatTitle;
-    QListWidget* m_chatList; // The main chat area
+    QListWidget* m_chatList;
     QLineEdit* m_messageInput;
     QPushButton* m_sendBtn;
 
-    // NEW: Edit mode UI
     QWidget* m_editBar;
     QLabel* m_editLabel;
     QPushButton* m_cancelEditBtn;
 
-    // NEW: Reply mode UI
     QWidget* m_replyBar;
     QLabel* m_replyLabel;
     QPushButton* m_cancelReplyBtn;
 
-    // Data
     QMap<QString, User> m_users;
     QMap<QString, Chat> m_chats;
     QString m_currentChatId;
     bool m_isDarkMode;
 
-    // NEW: Pending message tracking for optimistic sends
-    // Maps temporary message ID -> Message object
     QMap<QString, Message> m_pendingMessages;
 
-    // NEW: Edit mode state
     QString m_editingMessageId;
     QString m_editingOriginalText;
 
-    // NEW: Reply mode state
     QString m_replyingToMessageId;
     QString m_replyingToText;
     QString m_replyingToSender;
 
-    // NEW: Flag to prevent spamming history requests
     bool m_isLoadingHistory = false;
 
-    // Avatar Cache
     QMap<QString, QPixmap> m_avatarCache;
     QSet<QString> m_pendingDownloads;
+    
+    QString m_highlightedMessageId;
 };
 
 #endif // MAINWINDOW_H
