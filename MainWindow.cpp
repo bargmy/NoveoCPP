@@ -1918,6 +1918,7 @@ void MainWindow::showNotificationForMessage(const Message& msg)
     if (!m_notificationsEnabled) {
         return;
     }
+
     if (!m_trayIcon || !m_trayIcon->isVisible()) {
         return;
     }
@@ -1926,7 +1927,17 @@ void MainWindow::showNotificationForMessage(const Message& msg)
         return;
     }
 
-    if (isVisible() && isActiveWindow() && !isMinimized()) {
+    bool isAppVisible = isVisible() && !isMinimized();
+
+    // 1. If the user is actively using the app, suppress notifications.
+    if (isAppVisible && isActiveWindow()) {
+        return;
+    }
+
+    // 2. If the app is visible on screen (even if not focused) and the message
+    //    is for the chat currently being viewed, suppress the notification.
+    //    The user can see the message appearing in real-time.
+    if (isAppVisible && msg.chatId == m_currentChatId) {
         return;
     }
 
