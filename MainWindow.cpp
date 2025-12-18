@@ -41,76 +41,78 @@ void UserListDelegate::paint(QPainter* painter,
                              const QModelIndex& index) const
 {
     painter->save();
+    
     QStyleOptionViewItem opt = option;
     initStyleOption(&opt, index);
-
+    
     option.widget->style()->drawPrimitive(QStyle::PE_PanelItemViewItem, &opt, painter, option.widget);
-
+    
     QString fullText = index.data(Qt::DisplayRole).toString();
-    // FIX: Replaced qvariant_cast with value<QIcon>()
+    
+    // FIX: Added <QIcon> to value() call
     QIcon icon = index.data(Qt::DecorationRole).value<QIcon>();
+    
     QRect rect = opt.rect;
-
     const int padding = 10;
     const int iconSize = 40;
-
+    
     if (!icon.isNull()) {
         int iconY = rect.top() + (rect.height() - iconSize) / 2;
         icon.paint(painter, rect.left() + padding, iconY, iconSize, iconSize);
     }
-
+    
     static QRegularExpression regex("^(.*)\\s\\[#([a-fA-F0-9]{6}),\\s*\\\"(.*)\\\"\\]$");
     QRegularExpressionMatch match = regex.match(fullText);
-
+    
     QString name = fullText;
     QString tagText;
     QColor tagColor;
     bool hasTag = false;
-
+    
     if (match.hasMatch()) {
         name = match.captured(1).trimmed();
         tagColor = QColor("#" + match.captured(2));
         tagText = match.captured(3);
         hasTag = true;
     }
-
+    
     QColor textColor = (opt.state & QStyle::State_Selected) ? Qt::white : opt.palette.text().color();
     painter->setPen(textColor);
-
+    
     QFont nameFont = opt.font;
     nameFont.setPixelSize(14);
     painter->setFont(nameFont);
-
+    
     int textX = rect.left() + padding + iconSize + padding;
     QFontMetrics fm(nameFont);
     int nameWidth = fm.horizontalAdvance(name);
     int textY = rect.top() + (rect.height() - fm.height()) / 2 + fm.ascent();
-
+    
     painter->drawText(textX, textY, name);
-
+    
     if (hasTag) {
         int tagX = textX + nameWidth + 8;
         int tagH = 18;
         int tagY = rect.center().y() - tagH / 2;
-
+        
         QFont tagFont = nameFont;
         tagFont.setPixelSize(10);
         tagFont.setBold(true);
-
         QFontMetrics tagFm(tagFont);
         int tagW = tagFm.horizontalAdvance(tagText) + 12;
-
+        
         painter->setBrush(tagColor);
         painter->setPen(Qt::NoPen);
         painter->drawRoundedRect(tagX, tagY, tagW, tagH, 4, 4);
-
+        
         painter->setPen(Qt::white);
         painter->setFont(tagFont);
         painter->drawText(QRect(tagX, tagY, tagW, tagH), Qt::AlignCenter, tagText);
     }
-
+    
     painter->restore();
 }
+
 
 QSize UserListDelegate::sizeHint(const QStyleOptionViewItem& option,
                                  const QModelIndex& index) const
@@ -232,244 +234,248 @@ public:
         }
     }
 
-    void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
-        painter->save();
-        painter->setRenderHint(QPainter::Antialiasing);
+	void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
+		painter->save();
+		painter->setRenderHint(QPainter::Antialiasing);
 
-        QString text = index.data(Qt::UserRole + 1).toString();
-        QString sender = index.data(Qt::UserRole + 2).toString();
-        qint64 timestamp = index.data(Qt::UserRole + 3).toLongLong();
-        bool isMe = index.data(Qt::UserRole + 4).toBool();
-        // FIX: Replaced qvariant_cast with value<QIcon>()
-        QIcon avatar = index.data(Qt::DecorationRole).value<QIcon>();
-        QString replyToId = index.data(Qt::UserRole + 9).toString();
-        QString messageId = index.data(Qt::UserRole + 6).toString();
-        bool hasReply = !replyToId.isEmpty();
+		QString text = index.data(Qt::UserRole + 1).toString();
+		QString sender = index.data(Qt::UserRole + 2).toString();
+		qint64 timestamp = index.data(Qt::UserRole + 3).toLongLong();
+		bool isMe = index.data(Qt::UserRole + 4).toBool();
 
-        QRect bubbleRect, textRect, nameRect, avatarRect, replyQuoteRect;
-        int neededHeight;
-        QString replyText;
-        if (hasReply) {
-            replyText = index.data(Qt::UserRole + 10).toString();
-        }
+		// FIX: Added <QIcon> to value() call
+		QIcon avatar = index.data(Qt::DecorationRole).value<QIcon>();
 
-        // Pass 'replyQuoteRect' which is a local QRect variable
-        getBubbleLayout(text, sender, isMe, option.rect.width(), 
-                        bubbleRect, textRect, nameRect, avatarRect, neededHeight, 
-                        hasReply, replyText, replyQuoteRect);
+		QString replyToId = index.data(Qt::UserRole + 9).toString();
+		QString messageId = index.data(Qt::UserRole + 6).toString();
+		bool hasReply = !replyToId.isEmpty();
 
-        bubbleRect.translate(0, option.rect.top());
-        textRect.translate(0, option.rect.top());
-        nameRect.translate(0, option.rect.top());
-        avatarRect.translate(0, option.rect.top());
-        replyQuoteRect.translate(0, option.rect.top());
+		QRect bubbleRect, textRect, nameRect, avatarRect, replyQuoteRect;
+		int neededHeight;
+		QString replyText;
 
-        if (!isMe && !avatar.isNull()) {
-            avatar.paint(painter, avatarRect);
-        }
+		if (hasReply) {
+			replyText = index.data(Qt::UserRole + 10).toString();
+		}
 
-        QColor bubbleColor;
-        QColor borderColor;
-        QColor textColor;
-        QColor timeColor;
-        
-        bool isHighlighted = (messageId == m_highlightedMessageId);
+		// Pass 'replyQuoteRect' which is a local QRect variable
+		getBubbleLayout(text, sender, isMe, option.rect.width(),
+						bubbleRect, textRect, nameRect, avatarRect, neededHeight,
+						hasReply, replyText, replyQuoteRect);
 
-        if (m_isDarkMode) {
-            bubbleColor = isMe ? QColor("#2b5278") : QColor("#2d2d2d");
-            borderColor = Qt::transparent;
-            textColor = Qt::white;
-            timeColor = QColor("#a0a0a0");
-        } else {
-            bubbleColor = isMe ? QColor("#EEFFDE") : Qt::white;
-            borderColor = QColor("#d0d0d0");
-            textColor = Qt::black;
-            timeColor = QColor("#888888");
-        }
+		bubbleRect.translate(0, option.rect.top());
+		textRect.translate(0, option.rect.top());
+		nameRect.translate(0, option.rect.top());
+		avatarRect.translate(0, option.rect.top());
+		replyQuoteRect.translate(0, option.rect.top());
 
-        if (isHighlighted) {
-            borderColor = QColor("#FFD700");
-            painter->setBrush(bubbleColor);
-            painter->setPen(QPen(borderColor, 3));
-        } else {
-            painter->setBrush(bubbleColor);
-            painter->setPen(borderColor == Qt::transparent ? Qt::NoPen : QPen(borderColor, 1));
-        }
+		if (!isMe && !avatar.isNull()) {
+			avatar.paint(painter, avatarRect);
+		}
 
-        painter->drawRoundedRect(bubbleRect, 12, 12);
+		QColor bubbleColor;
+		QColor borderColor;
+		QColor textColor;
+		QColor timeColor;
 
-        if (!isMe) {
-            static QRegularExpression regex("^(.*)\\s\\[#([a-fA-F0-9]{6}),\\s*\\\"(.*)\\\"\\]$");
-            QRegularExpressionMatch match = regex.match(sender);
-            QString displayName = sender;
-            QString tagText;
-            QColor tagColor;
-            bool hasTag = false;
+		bool isHighlighted = (messageId == m_highlightedMessageId);
 
-            if (match.hasMatch()) {
-                displayName = match.captured(1).trimmed();
-                tagColor = QColor("#" + match.captured(2));
-                tagText = match.captured(3);
-                hasTag = true;
-            }
+		if (m_isDarkMode) {
+			bubbleColor = isMe ? QColor("#2b5278") : QColor("#2d2d2d");
+			borderColor = Qt::transparent;
+			textColor = Qt::white;
+			timeColor = QColor("#a0a0a0");
+		} else {
+			bubbleColor = isMe ? QColor("#EEFFDE") : Qt::white;
+			borderColor = QColor("#d0d0d0");
+			textColor = Qt::black;
+			timeColor = QColor("#888888");
+		}
 
-            painter->setPen(QColor("#E35967"));
-            QFont nameFont = option.font;
-            nameFont.setPixelSize(11);
-            nameFont.setBold(true);
-            painter->setFont(nameFont);
-            QFontMetrics fm(nameFont);
+		if (isHighlighted) {
+			borderColor = QColor("#FFD700");
+			painter->setBrush(bubbleColor);
+			painter->setPen(QPen(borderColor, 3));
+		} else {
+			painter->setBrush(bubbleColor);
+			painter->setPen(borderColor == Qt::transparent ? Qt::NoPen : QPen(borderColor, 1));
+		}
 
-            int nameW = fm.horizontalAdvance(displayName);
-            painter->drawText(nameRect.left(), nameRect.top() + fm.ascent(), displayName);
+		painter->drawRoundedRect(bubbleRect, 12, 12);
 
-            if (hasTag) {
-                int tagX = nameRect.left() + nameW + 6;
-                int tagY = nameRect.top();
-                int tagW = fm.horizontalAdvance(tagText) + 10;
-                int tagH = 14;
+		if (!isMe) {
+			static QRegularExpression regex("^(.*)\\s\\[#([a-fA-F0-9]{6}),\\s*\\\"(.*)\\\"\\]$");
+			QRegularExpressionMatch match = regex.match(sender);
 
-                painter->setBrush(tagColor);
-                painter->setPen(Qt::NoPen);
-                painter->drawRoundedRect(tagX, tagY, tagW, tagH, 3, 3);
-                
-                painter->setPen(Qt::white);
-                QFont tagFont = nameFont;
-                tagFont.setPixelSize(9);
-                painter->setFont(tagFont);
-                painter->drawText(QRect(tagX, tagY, tagW, tagH), Qt::AlignCenter, tagText);
-            }
-        }
+			QString displayName = sender;
+			QString tagText;
+			QColor tagColor;
+			bool hasTag = false;
 
-        // Draw Reply Quote
-        if (!replyToId.isEmpty()) {
-            QString replySenderName = index.data(Qt::UserRole + 11).toString();
-            int replyX = replyQuoteRect.left();
-            int replyY = replyQuoteRect.top();
+			if (match.hasMatch()) {
+				displayName = match.captured(1).trimmed();
+				tagColor = QColor("#" + match.captured(2));
+				tagText = match.captured(3);
+				hasTag = true;
+			}
 
-            if (!replySenderName.isEmpty()) {
-                QFont senderFont("Segoe UI", 9);
-                senderFont.setBold(true);
-                painter->setFont(senderFont);
-                painter->setPen(m_isDarkMode ? QColor("#60A5FA") : QColor("#2563EB"));
-                QFontMetrics senderFm(senderFont);
-                painter->drawText(replyX + 6, replyY + senderFm.ascent(), replySenderName);
-                replyY += senderFm.height() + 2;
-            }
+			painter->setPen(QColor("#E35967"));
+			QFont nameFont = option.font;
+			nameFont.setPixelSize(11);
+			nameFont.setBold(true);
+			painter->setFont(nameFont);
 
-            // Vertical line
-            painter->setPen(m_isDarkMode ? QColor("#666") : QColor("#ccc"));
-            painter->drawLine(replyX, replyY, replyX, replyY + 20);
+			QFontMetrics fm(nameFont);
+			int nameW = fm.horizontalAdvance(displayName);
+			painter->drawText(nameRect.left(), nameRect.top() + fm.ascent(), displayName);
 
-            QFont replyFont("Segoe UI", 9);
-            replyFont.setItalic(true);
-            painter->setFont(replyFont);
-            painter->setPen(m_isDarkMode ? QColor("#aaa") : QColor("#666"));
+			if (hasTag) {
+				int tagX = nameRect.left() + nameW + 6;
+				int tagY = nameRect.top();
+				int tagW = fm.horizontalAdvance(tagText) + 10;
+				int tagH = 14;
 
-            if (replyText.isEmpty()) {
-                replyText = "[Original message]";
-            }
-            QString replyPreview = replyText.length() > 40 ? replyText.left(40) + "..." : replyText;
-            QFontMetrics replyFm(replyFont);
-            painter->drawText(replyX + 6, replyY + replyFm.ascent() + 2, replyPreview);
-        }
+				painter->setBrush(tagColor);
+				painter->setPen(Qt::NoPen);
+				painter->drawRoundedRect(tagX, tagY, tagW, tagH, 3, 3);
 
-        // Draw Message Text
-        painter->setPen(textColor);
-        QTextDocument doc;
-        QFont textFont("Segoe UI", 10);
-        doc.setDefaultFont(textFont);
+				painter->setPen(Qt::white);
+				QFont tagFont = nameFont;
+				tagFont.setPixelSize(9);
+				painter->setFont(tagFont);
+				painter->drawText(QRect(tagX, tagY, tagW, tagH), Qt::AlignCenter, tagText);
+			}
+		}
 
-        QString html = QString("<font color='%1'>%2</font>")
-                           .arg(textColor.name())
-                           .arg(text.toHtmlEscaped().replace("\n", "<br>"));
-        doc.setHtml(html);
-        doc.setTextWidth(textRect.width());
+		// Draw Reply Quote
+		if (!replyToId.isEmpty()) {
+			QString replySenderName = index.data(Qt::UserRole + 11).toString();
+			int replyX = replyQuoteRect.left();
+			int replyY = replyQuoteRect.top();
 
-        painter->translate(textRect.topLeft());
-        doc.drawContents(painter);
-        painter->translate(-textRect.topLeft());
+			if (!replySenderName.isEmpty()) {
+				QFont senderFont("Segoe UI", 9);
+				senderFont.setBold(true);
+				painter->setFont(senderFont);
+				painter->setPen(m_isDarkMode ? QColor("#60A5FA") : QColor("#2563EB"));
+				QFontMetrics senderFm(senderFont);
+				painter->drawText(replyX + 6, replyY + senderFm.ascent(), replySenderName);
+				replyY += senderFm.height() + 2;
+			}
 
-        // Draw Time & Status
-        QDateTime dt;
-        dt.setSecsSinceEpoch(timestamp);
-        QString timeStr = dt.toString("hh:mm AP");
+			// Vertical line
+			painter->setPen(m_isDarkMode ? QColor("#666") : QColor("#ccc"));
+			painter->drawLine(replyX, replyY, replyX, replyY + 20);
 
-        painter->setPen(timeColor);
-        QFont timeFont = option.font;
-        timeFont.setPixelSize(9);
-        painter->setFont(timeFont);
-        QFontMetrics timeFm(timeFont);
-        int timeWidth = timeFm.horizontalAdvance(timeStr);
+			QFont replyFont("Segoe UI", 9);
+			replyFont.setItalic(true);
+			painter->setFont(replyFont);
+			painter->setPen(m_isDarkMode ? QColor("#aaa") : QColor("#666"));
 
-        if (isMe) {
-            int statusInt = index.data(Qt::UserRole + 5).toInt();
-            MessageStatus status = static_cast<MessageStatus>(statusInt);
+			if (replyText.isEmpty()) {
+				replyText = "[Original message]";
+			}
+			QString replyPreview = replyText.length() > 40 ? replyText.left(40) + "..." : replyText;
+			QFontMetrics replyFm(replyFont);
+			painter->drawText(replyX + 6, replyY + replyFm.ascent() + 2, replyPreview);
+		}
 
-            QFont statusFont("Segoe UI", 9);
-            painter->setFont(statusFont);
-            QFontMetrics fm(statusFont);
+		// Draw Message Text
+		painter->setPen(textColor);
+		QTextDocument doc;
+		QFont textFont("Segoe UI", 10);
+		doc.setDefaultFont(textFont);
 
-            QString checkmark = QString(QChar(0x2713));
-            QString circle = QString(QChar(0x25CB));
-            bool hasCheckmark = fm.horizontalAdvance(checkmark) > 0;
+		QString html = QString("<font color='%1'>%2</font>")
+						   .arg(textColor.name())
+						   .arg(text.toHtmlEscaped().replace("\n", "<br>"));
+		doc.setHtml(html);
+		doc.setTextWidth(textRect.width());
 
-            QString statusIcon;
-            QColor statusColor = timeColor;
-            int iconX = 0;
+		painter->translate(textRect.topLeft());
+		doc.drawContents(painter);
+		painter->translate(-textRect.topLeft());
 
-            if (status == MessageStatus::Pending) {
-                statusIcon = circle;
-                statusColor = QColor("#999999");
-            } else if (status == MessageStatus::Sent) {
-                statusIcon = hasCheckmark ? checkmark : "v";
-                statusColor = QColor("#999999");
-            } else if (status == MessageStatus::Seen) {
-                if (hasCheckmark) {
-                    painter->setPen(m_isDarkMode ? QColor("#93C5FD") : QColor("#60A5FA"));
-                    int singleWidth = fm.horizontalAdvance(checkmark);
-                    int overlapOffset = singleWidth / 2;
-                    iconX = bubbleRect.right() - 8 - timeWidth - 4 - singleWidth - overlapOffset;
-                    int iconY = bubbleRect.bottom() - 5 - timeFm.height();
-                    painter->drawText(iconX, iconY + fm.ascent(), checkmark);
-                    painter->drawText(iconX + overlapOffset, iconY + fm.ascent(), checkmark);
-                    statusIcon.clear(); 
-                } else {
-                    statusIcon = "vv";
-                    statusColor = m_isDarkMode ? QColor("#93C5FD") : QColor("#60A5FA");
-                }
-            }
+		// Draw Time & Status
+		QDateTime dt;
+		dt.setSecsSinceEpoch(timestamp);
+		QString timeStr = dt.toString("hh:mm AP");
 
-            if (!statusIcon.isEmpty()) {
-                painter->setPen(statusColor);
-                int iconWidth = fm.horizontalAdvance(statusIcon);
-                iconX = bubbleRect.right() - 8 - timeWidth - 4 - iconWidth;
-                int iconY = bubbleRect.bottom() - 5 - timeFm.height();
-                painter->drawText(iconX, iconY + fm.ascent(), statusIcon);
-            }
-        }
+		painter->setPen(timeColor);
+		QFont timeFont = option.font;
+		timeFont.setPixelSize(9);
+		painter->setFont(timeFont);
+		QFontMetrics timeFm(timeFont);
+		int timeWidth = timeFm.horizontalAdvance(timeStr);
 
-        painter->setPen(timeColor);
-        painter->setFont(timeFont);
-        painter->drawText(bubbleRect.adjusted(0, 0, -8, -5), Qt::AlignBottom | Qt::AlignRight, timeStr);
+		if (isMe) {
+			int statusInt = index.data(Qt::UserRole + 5).toInt();
+			MessageStatus status = static_cast<MessageStatus>(statusInt);
 
-        qint64 editedAt = index.data(Qt::UserRole + 7).toLongLong();
-        if (editedAt > 0) {
-            QFont editedFont = timeFont;
-            editedFont.setItalic(true);
-            editedFont.setPixelSize(8);
-            painter->setFont(editedFont);
-            painter->setPen(QColor("#888888"));
-            QFontMetrics editedFm(editedFont);
-            QString editedText = "edited";
-            int editedWidth = editedFm.horizontalAdvance(editedText);
-            int editedX = bubbleRect.right() - 8 - editedWidth;
-            int editedY = bubbleRect.bottom() - 5 - timeFm.height() - editedFm.height() - 2;
-            painter->drawText(editedX, editedY + editedFm.ascent(), editedText);
-        }
+			QFont statusFont("Segoe UI", 9);
+			painter->setFont(statusFont);
+			QFontMetrics fm(statusFont);
 
-        painter->restore();
-    }
+			QString checkmark = QString(QChar(0x2713));
+			QString circle = QString(QChar(0x25CB));
+			bool hasCheckmark = fm.horizontalAdvance(checkmark) > 0;
+
+			QString statusIcon;
+			QColor statusColor = timeColor;
+			int iconX = 0;
+
+			if (status == MessageStatus::Pending) {
+				statusIcon = circle;
+				statusColor = QColor("#999999");
+			} else if (status == MessageStatus::Sent) {
+				statusIcon = hasCheckmark ? checkmark : "v";
+				statusColor = QColor("#999999");
+			} else if (status == MessageStatus::Seen) {
+				if (hasCheckmark) {
+					painter->setPen(m_isDarkMode ? QColor("#93C5FD") : QColor("#60A5FA"));
+					int singleWidth = fm.horizontalAdvance(checkmark);
+					int overlapOffset = singleWidth / 2;
+					iconX = bubbleRect.right() - 8 - timeWidth - 4 - singleWidth - overlapOffset;
+					int iconY = bubbleRect.bottom() - 5 - timeFm.height();
+					painter->drawText(iconX, iconY + fm.ascent(), checkmark);
+					painter->drawText(iconX + overlapOffset, iconY + fm.ascent(), checkmark);
+					statusIcon.clear();
+				} else {
+					statusIcon = "vv";
+					statusColor = m_isDarkMode ? QColor("#93C5FD") : QColor("#60A5FA");
+				}
+			}
+
+			if (!statusIcon.isEmpty()) {
+				painter->setPen(statusColor);
+				int iconWidth = fm.horizontalAdvance(statusIcon);
+				iconX = bubbleRect.right() - 8 - timeWidth - 4 - iconWidth;
+				int iconY = bubbleRect.bottom() - 5 - timeFm.height();
+				painter->drawText(iconX, iconY + fm.ascent(), statusIcon);
+			}
+		}
+
+		painter->setPen(timeColor);
+		painter->setFont(timeFont);
+		painter->drawText(bubbleRect.adjusted(0, 0, -8, -5), Qt::AlignBottom | Qt::AlignRight, timeStr);
+
+		qint64 editedAt = index.data(Qt::UserRole + 7).toLongLong();
+		if (editedAt > 0) {
+			QFont editedFont = timeFont;
+			editedFont.setItalic(true);
+			editedFont.setPixelSize(8);
+			painter->setFont(editedFont);
+			painter->setPen(QColor("#888888"));
+			QFontMetrics editedFm(editedFont);
+			QString editedText = "edited";
+			int editedWidth = editedFm.horizontalAdvance(editedText);
+			int editedX = bubbleRect.right() - 8 - editedWidth;
+			int editedY = bubbleRect.bottom() - 5 - timeFm.height() - editedFm.height() - 2;
+			painter->drawText(editedX, editedY + editedFm.ascent(), editedText);
+		}
+
+		painter->restore();
+	}
 
     QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const override {
         QString text = index.data(Qt::UserRole + 1).toString();
