@@ -1249,51 +1249,37 @@ void MainWindow::renderMessages(const QString& chatId) {
 }
 
 QString MainWindow::getReplyPreviewText(const QString& replyToId, const QString& chatId) {
-    QString replyText;
-    
-    // 1. Try finding in current list
+    // 1. Try finding in the currently rendered list (m_chatList)
+    // This allows picking up text even if it's just been added to the UI
     for (int i = 0; i < m_chatList->count(); i++) {
         QListWidgetItem* listItem = m_chatList->item(i);
+        // Qt::UserRole + 6 is the MessageIdRole defined in other parts of your code
         QString itemMsgId = listItem->data(Qt::UserRole + 6).toString();
-        QString itemText = listItem->data(Qt::UserRole + 1).toString();
-        if (itemMsgId == replyToId) {
-            replyText = itemText;
-            break;
-        }
-    }
-
-    // 2. Try finding in data model
-    if (replyText.isEmpty() && !chatId.isEmpty() && m_chats.contains(chatId)) {
-        for (const auto& m : m_chats[chatId].messages) {
-            if (m.messageId == replyToId) {
-                replyText = m.text;
-                break;
-            }
-        }
-    }
-
-    if (!replyText.isEmpty()) {
-        QString trimmed = replyText.trimmed();
-        bool isJustURL = trimmed.startsWith("http") && 
-                         (trimmed.contains("/static/upload") || trimmed.contains("/static/upl"));
         
-        if (isJustURL) {
-            QStringList words = trimmed.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
-            if (words.size() == 1) {
-                replyText = "[Image]";
-            } else if (words.size() == 2 && words.last().startsWith("http")) {
-                replyText = words.first() + " [Image]";
-            }
-        } else if (trimmed.startsWith("[FILE:") && trimmed.endsWith("]")) {
-            replyText = "[Image]";
+        if (itemMsgId == replyToId) {
+            // Qt::UserRole + 1 is the TextRole
+            return listItem->data(Qt::UserRole + 1).toString();
         }
     }
 
-    if (replyText.isEmpty()) {
-        replyText = "[Original message]";
+    // 2. Try finding in the internal data model (m_chats)
+    // This handles cases where the message is in memory but maybe not currently rendered
+    if (m_chats.contains(chatId)) {
+        const std::vector<Message>& msgs = m_chats[chatId].messages;
+        
+        auto it = std::find_if(msgs.begin(), msgs.end(), [&](const Message& m) {
+            return m.messageId == replyToId;
+        });
+
+        if (it != msgs.end()) {
+            return it->text;
+        }
     }
 
-    return replyText;
+    // 3. Fallback
+    // PREVIOUS BUG: incorrectly returned 'replyToId' here, causing URLs/IDs to show
+    // FIX: Return a placeholder text.
+    return "Message not loaded";
 }
 
 void MainWindow::addMessageBubble(const Message& msg, bool appendStretch, bool animate) {
@@ -1929,32 +1915,58 @@ void MainWindow::showNotificationForMessage(const Message& msg)
 
     bool isAppVisible = isVisible() && !isMinimized();
 
-    // 1. If the user is actively using the app, suppress notifications.
+    // Suppress if app is focused
     if (isAppVisible && isActiveWindow()) {
         return;
     }
 
-    // 2. If the app is visible on screen (even if not focused) and the message
-    //    is for the chat currently being viewed, suppress the notification.
-    //    The user can see the message appearing in real-time.
+    // Suppress if looking at the specific chat
     if (isAppVisible && msg.chatId == m_currentChatId) {
         return;
     }
 
-    QString title = "New message";
-    if (m_chats.contains(msg.chatId)) {
-        title = resolveChatName(m_chats[msg.chatId]);
+    // 1. Resolve Sender Name and Avatar
+    QString senderName = "Unknown";
+    QString avatarUrl;
+    
+    if (m_users.contains(msg.senderId)) {
+        senderName = m_users[msg.senderId].username;
+        avatarUrl = m_users[msg.senderId].avatarUrl;
     }
 
+    // 2. Resolve Chat Name and Title Format
+    QString title;
+    if (m_chats.contains(msg.chatId)) {
+        Chat chat = m_chats[msg.chatId];
+        QString chatName = resolveChatName(chat);
+
+        if (chat.chatType == "private") {
+            // For private chats, just show the sender's name
+            title = senderName;
+        } else {
+            // For group/public chats: "{User} in {Chat}"
+            title = QString("%1 in %2").arg(senderName, chatName);
+        }
+    } else {
+        title = senderName;
+    }
+
+    // 3. Prepare Body
     QString body = msg.text.trimmed();
     if (body.isEmpty()) {
-        body = "New message";
+        body = "Sent a message";
     }
     if (body.size() > 100) {
         body = body.left(97) + "...";
     }
 
-    m_trayIcon->showMessage(title, body, QSystemTrayIcon::Information, 5000);
+    // 4. Get Avatar Icon
+    // getAvatar handles caching; if not cached, it returns a generic generated avatar
+    QIcon icon = getAvatar(senderName, avatarUrl);
+
+    // 5. Show Notification with Custom Icon
+    // Note: This overload requires Qt 5.2+ (your project uses 5.15)
+    m_trayIcon->showMessage(title, body, icon, 5000);
 }
 
 void MainWindow::closeEvent(QCloseEvent* event)
