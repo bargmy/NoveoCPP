@@ -43,6 +43,7 @@ jobs:
           if (Select-String -Path "MainWindow.cpp","WebSocketClient.cpp" -Pattern "pcpapc172" -SimpleMatch -Quiet) {
             throw "Found deprecated backend domain 'pcpapc172' in source files"
           }
+
       - name: Configure
         shell: pwsh
         run: |
@@ -78,8 +79,25 @@ jobs:
 
           & "C:/Qt/5.15.2/msvc2019_64/bin/windeployqt.exe" --release --compiler-runtime "$distBin/NoveoDesktop.exe"
 
-          Get-ChildItem -Path $distRoot -Recurse -File -Include "vcredist*.exe","opengl32.dll" |
-            Remove-Item -Force
+          Write-Host "Files matched for removal before packaging:"
+          $filesToRemove = Get-ChildItem -Path $distRoot -Recurse -File | Where-Object {
+            $_.Name -like 'vcredist*.exe' -or $_.Name -eq 'opengl32.dll' -or $_.Name -eq 'opengl32sw.dll'
+          }
+          $filesToRemove | Select-Object FullName, Length | Format-Table -AutoSize
+
+          if ($filesToRemove) {
+            $filesToRemove | Remove-Item -Force
+          }
+
+          $remainingForbidden = Get-ChildItem -Path $distRoot -Recurse -File | Where-Object {
+            $_.Name -like 'vcredist*.exe' -or $_.Name -eq 'opengl32.dll' -or $_.Name -eq 'opengl32sw.dll'
+          }
+
+          if ($remainingForbidden) {
+            Write-Host "Forbidden files still present after cleanup:"
+            $remainingForbidden | Select-Object FullName, Length | Format-Table -AutoSize
+            throw "Packaging cleanup failed"
+          }
 
       - name: Package zip
         shell: pwsh
@@ -88,6 +106,7 @@ jobs:
           $zipName = "build_$version.zip"
           if (Test-Path $zipName) { Remove-Item $zipName -Force }
           Compress-Archive -Path "dist/build_$version/*" -DestinationPath $zipName -CompressionLevel Optimal
+          Get-Item $zipName | Select-Object FullName, Length | Format-Table -AutoSize
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
