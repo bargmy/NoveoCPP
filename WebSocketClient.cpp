@@ -13,7 +13,7 @@ WebSocketClient::WebSocketClient(QObject* parent) : QObject(parent)
 
 void WebSocketClient::connectToServer() {
     // URL from server config
-    m_webSocket.open(QUrl(QStringLiteral("wss://api.pcpapc172.ir:8443/ws")));
+    m_webSocket.open(QUrl(QStringLiteral("wss://noveo.ir:8443/ws")));
 }
 
 void WebSocketClient::onSslErrors(const QList<QSslError>& errors) {
