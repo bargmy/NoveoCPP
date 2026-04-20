@@ -31,6 +31,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip aqtinstall
           choco install ninja -y
+          choco install openssl.light -y
 
       - name: Install Qt 5.15.2 (MSVC)
         shell: pwsh
@@ -78,6 +79,27 @@ jobs:
           }
 
           & "C:/Qt/5.15.2/msvc2019_64/bin/windeployqt.exe" --release --compiler-runtime "$distBin/NoveoDesktop.exe"
+
+          $opensslCandidates = @(
+            "C:/Program Files/OpenSSL-Win64/bin/libssl-1_1-x64.dll",
+            "C:/Program Files/OpenSSL-Win64/bin/libcrypto-1_1-x64.dll",
+            "C:/Program Files/OpenSSL/bin/libssl-1_1-x64.dll",
+            "C:/Program Files/OpenSSL/bin/libcrypto-1_1-x64.dll"
+          )
+
+          $sslDll = $opensslCandidates | Where-Object { $_ -like '*libssl-1_1-x64.dll' -and (Test-Path $_) } | Select-Object -First 1
+          $cryptoDll = $opensslCandidates | Where-Object { $_ -like '*libcrypto-1_1-x64.dll' -and (Test-Path $_) } | Select-Object -First 1
+
+          if (-not $sslDll -or -not $cryptoDll) {
+            Write-Host "Checked OpenSSL DLL candidates:"
+            $opensslCandidates | ForEach-Object { Write-Host $_ }
+            throw "Required OpenSSL runtime DLLs were not found"
+          }
+
+          Copy-Item $sslDll "$distBin/libssl-1_1-x64.dll" -Force
+          Copy-Item $cryptoDll "$distBin/libcrypto-1_1-x64.dll" -Force
+          Write-Host "Bundled OpenSSL DLLs:"
+          Get-Item "$distBin/libssl-1_1-x64.dll", "$distBin/libcrypto-1_1-x64.dll" | Select-Object FullName, Length | Format-Table -AutoSize
 
           Write-Host "Files matched for removal before packaging:"
           $filesToRemove = Get-ChildItem -Path $distRoot -Recurse -File | Where-Object {
