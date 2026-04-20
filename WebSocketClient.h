@@ -38,6 +38,7 @@ public:
 signals:
     void connected();
     void disconnected();
+    void debugLog(const QString& message);
     void loginSuccess(const User& user, const QString& token);
     void authFailed(const QString& message);
     void chatHistoryReceived(const std::vector<Chat>& chats);

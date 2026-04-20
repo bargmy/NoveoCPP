@@ -32,6 +32,9 @@
 #include <QSystemTrayIcon>
 #include <QAction>
 #include <QCloseEvent>
+#include <QDialog>
+#include <QPlainTextEdit>
+#include <QShortcut>
 
 const int AvatarUrlRole = Qt::UserRole + 10;
 const QString API_BASE_URL = "https://noveo.ir:8443";
@@ -547,6 +550,8 @@ MainWindow::MainWindow(QWidget* parent)
     }
 
     connect(m_client, &WebSocketClient::connected, this, &MainWindow::onConnected);
+    connect(m_client, &WebSocketClient::disconnected, this, &MainWindow::onDisconnected);
+    connect(m_client, &WebSocketClient::debugLog, this, &MainWindow::onClientDebugLog);
     connect(m_client, &WebSocketClient::loginSuccess, this, &MainWindow::onLoginSuccess);
     connect(m_client, &WebSocketClient::authFailed, this, &MainWindow::onAuthFailed);
     connect(m_client, &WebSocketClient::chatHistoryReceived, this, &MainWindow::onChatHistoryReceived);
@@ -640,12 +645,19 @@ void MainWindow::setupUi() {
     QPushButton* logoutBtn = new QPushButton("Log Out");
     connect(logoutBtn, &QPushButton::clicked, this, &MainWindow::onLogoutClicked);
 
+    QPushButton* devConsoleBtn = new QPushButton("Developer Console");
+    connect(devConsoleBtn, &QPushButton::clicked, this, &MainWindow::onOpenDeveloperConsole);
+
     settingsLayout->addWidget(new QLabel("Settings"));
     settingsLayout->addWidget(darkModeCheck);
     settingsLayout->addWidget(m_notificationsCheck);
+    settingsLayout->addWidget(devConsoleBtn);
     settingsLayout->addStretch();
     settingsLayout->addWidget(logoutBtn);
     settingsLayout->addSpacing(20);
+
+    QShortcut* devConsoleShortcut = new QShortcut(QKeySequence("Ctrl+Shift+I"), this);
+    connect(devConsoleShortcut, &QShortcut::activated, this, &MainWindow::onOpenDeveloperConsole);
 
     m_sidebarTabs->addTab(m_chatListWidget, "Chats");
     m_sidebarTabs->addTab(m_contactListWidget, "Contacts");
@@ -873,6 +885,44 @@ void MainWindow::onConnected() {
     if (settings.contains("username") && settings.contains("password")) {
         m_statusLabel->setText("Auto-logging in...");
         onLoginBtnClicked();
+    }
+}
+
+void MainWindow::onDisconnected() {
+    m_statusLabel->setText("Disconnected. Reconnecting...");
+    m_loginBtn->setEnabled(false);
+}
+
+void MainWindow::onOpenDeveloperConsole() {
+    if (!m_devConsoleDialog) {
+        m_devConsoleDialog = new QDialog(this);
+        m_devConsoleDialog->setWindowTitle("Developer Console");
+        m_devConsoleDialog->resize(760, 380);
+
+        QVBoxLayout* layout = new QVBoxLayout(m_devConsoleDialog);
+        m_devConsoleOutput = new QPlainTextEdit(m_devConsoleDialog);
+        m_devConsoleOutput->setReadOnly(true);
+        m_devConsoleOutput->setLineWrapMode(QPlainTextEdit::NoWrap);
+        m_devConsoleOutput->setPlainText(m_devConsoleBuffer.join("\n"));
+        layout->addWidget(m_devConsoleOutput);
+    }
+
+    m_devConsoleDialog->show();
+    m_devConsoleDialog->raise();
+    m_devConsoleDialog->activateWindow();
+}
+
+void MainWindow::onClientDebugLog(const QString& message) {
+    const QString line = QString("[%1] %2")
+                             .arg(QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss"))
+                             .arg(message);
+    m_devConsoleBuffer.append(line);
+    if (m_devConsoleBuffer.size() > 500) {
+        m_devConsoleBuffer.removeFirst();
+    }
+
+    if (m_devConsoleOutput) {
+        m_devConsoleOutput->appendPlainText(line);
     }
 }
 
@@ -2012,5 +2062,3 @@ void MainWindow::onNotificationsToggled(bool checked)
     QSettings settings("Noveo", "MessengerClient");
     settings.setValue("notificationsEnabled", m_notificationsEnabled);
 }
-
-

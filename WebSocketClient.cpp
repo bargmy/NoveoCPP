@@ -6,13 +6,16 @@
 WebSocketClient::WebSocketClient(QObject* parent) : QObject(parent)
 {
     connect(&m_webSocket, &QWebSocket::connected, this, &WebSocketClient::onConnected);
-    connect(&m_webSocket, &QWebSocket::disconnected, this, &WebSocketClient::disconnected);
+    connect(&m_webSocket, &QWebSocket::disconnected, this, [this]() {
+        emit debugLog("WebSocket disconnected");
+        emit disconnected();
+    });
     connect(&m_webSocket, &QWebSocket::textMessageReceived, this, &WebSocketClient::onTextMessageReceived);
     connect(&m_webSocket, &QWebSocket::sslErrors, this, &WebSocketClient::onSslErrors);
 }
 
 void WebSocketClient::connectToServer() {
-    // URL from server config
+    emit debugLog("Connecting websocket to wss://noveo.ir:8443/ws");
     m_webSocket.open(QUrl(QStringLiteral("wss://noveo.ir:8443/ws")));
 }
 
@@ -22,6 +25,7 @@ void WebSocketClient::onSslErrors(const QList<QSslError>& errors) {
 }
 
 void WebSocketClient::onConnected() {
+    emit debugLog("WebSocket connected");
     qDebug() << "WebSocket connected";
     emit connected();
 }
@@ -37,6 +41,7 @@ void WebSocketClient::login(const QString& username, const QString& password) {
     payload["username"] = username;
     payload["password"] = password;
     QJsonDocument doc(payload);
+    emit debugLog(QString("WS OUT: login_with_password for user '%1'").arg(username));
     m_webSocket.sendTextMessage(QString::fromUtf8(doc.toJson(QJsonDocument::Compact)));
 }
 
@@ -77,6 +82,7 @@ void WebSocketClient::sendMessage(const QString& chatId, const QString& text, co
     }
 
     QJsonDocument doc(payload);
+    emit debugLog(QString("WS OUT: message to chat '%1'").arg(chatId));
     m_webSocket.sendTextMessage(QString::fromUtf8(doc.toJson(QJsonDocument::Compact)));
 }
 
@@ -94,6 +100,7 @@ void WebSocketClient::fetchHistory(const QString& chatId, qint64 beforeTimestamp
 }
 
 void WebSocketClient::onTextMessageReceived(QString message) {
+    emit debugLog("WS IN: " + message.left(300));
     QJsonDocument doc = QJsonDocument::fromJson(message.toUtf8());
     if (!doc.isObject()) return;
 
