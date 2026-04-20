@@ -2,7 +2,6 @@ name: Build Windows Release (Qt5/MSVC)
 
 on:
   workflow_dispatch:
-  pull_request:
   push:
     branches: [ main, work, codex/task-title ]
     tags:
@@ -100,7 +99,6 @@ jobs:
           files: build_1.4.0.0.zip
 
       - name: Upload release zip to Telegram
-        if: github.event_name != 'pull_request'
         shell: pwsh
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
