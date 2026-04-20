@@ -78,6 +78,9 @@ jobs:
 
           & "C:/Qt/5.15.2/msvc2019_64/bin/windeployqt.exe" --release --compiler-runtime "$distBin/NoveoDesktop.exe"
 
+          Get-ChildItem -Path $distRoot -Recurse -File -Include "vcredist*.exe","opengl32.dll" |
+            Remove-Item -Force
+
       - name: Package zip
         shell: pwsh
         run: |
