@@ -80,30 +80,44 @@ jobs:
 
           & "C:/Qt/5.15.2/msvc2019_64/bin/windeployqt.exe" --release --compiler-runtime "$distBin/NoveoDesktop.exe"
 
-          $searchRoots = @(
-            'C:/Program Files',
-            'C:/Program Files (x86)',
-            'C:/tools',
-            'C:/ProgramData/chocolatey'
+          $candidateDirs = @(
+            'C:/ProgramData/chocolatey/lib/openssl.light/tools',
+            'C:/ProgramData/chocolatey/lib/openssl.light/bin',
+            'C:/ProgramData/chocolatey/bin',
+            'C:/tools/openssl',
+            'C:/tools/openssl/bin',
+            'C:/Program Files/OpenSSL-Win64/bin',
+            'C:/Program Files/OpenSSL/bin'
           ) | Where-Object { Test-Path $_ }
 
-          Write-Host "Searching OpenSSL DLLs under:"
-          $searchRoots | ForEach-Object { Write-Host $_ }
+          Write-Host "Checking OpenSSL candidate directories:"
+          $candidateDirs | ForEach-Object { Write-Host $_ }
 
-          $sslMatches = foreach ($root in $searchRoots) {
-            Get-ChildItem -Path $root -Recurse -File -Filter 'libssl-1_1-x64.dll' -ErrorAction SilentlyContinue
+          $sslDll = $null
+          $cryptoDll = $null
+          foreach ($dir in $candidateDirs) {
+            if (-not $sslDll) {
+              $sslDll = Get-ChildItem -Path $dir -File -Filter 'libssl-1_1-x64.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
+            }
+            if (-not $cryptoDll) {
+              $cryptoDll = Get-ChildItem -Path $dir -File -Filter 'libcrypto-1_1-x64.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
+            }
           }
-          $cryptoMatches = foreach ($root in $searchRoots) {
-            Get-ChildItem -Path $root -Recurse -File -Filter 'libcrypto-1_1-x64.dll' -ErrorAction SilentlyContinue
+
+          if ((-not $sslDll -or -not $cryptoDll) -and (Test-Path 'C:/ProgramData/chocolatey/lib/openssl.light')) {
+            Write-Host "Fast path did not find both DLLs; searching only inside Chocolatey openssl.light package root"
+            $packageRoot = 'C:/ProgramData/chocolatey/lib/openssl.light'
+            if (-not $sslDll) {
+              $sslDll = Get-ChildItem -Path $packageRoot -Recurse -File -Filter 'libssl-1_1-x64.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
+            }
+            if (-not $cryptoDll) {
+              $cryptoDll = Get-ChildItem -Path $packageRoot -Recurse -File -Filter 'libcrypto-1_1-x64.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
+            }
           }
 
-          Write-Host "libssl matches:"
-          $sslMatches | Select-Object FullName, Length | Format-Table -AutoSize
-          Write-Host "libcrypto matches:"
-          $cryptoMatches | Select-Object FullName, Length | Format-Table -AutoSize
-
-          $sslDll = $sslMatches | Select-Object -First 1
-          $cryptoDll = $cryptoMatches | Select-Object -First 1
+          Write-Host "Selected OpenSSL DLLs:"
+          if ($sslDll) { Write-Host $sslDll.FullName } else { Write-Host 'libssl-1_1-x64.dll not found' }
+          if ($cryptoDll) { Write-Host $cryptoDll.FullName } else { Write-Host 'libcrypto-1_1-x64.dll not found' }
 
           if (-not $sslDll -or -not $cryptoDll) {
             throw "Required OpenSSL runtime DLLs were not found"
