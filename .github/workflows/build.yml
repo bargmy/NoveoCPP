@@ -64,6 +64,7 @@ jobs:
           $distRoot = "dist/build_$version"
           $distBin = "$distRoot"
           New-Item -ItemType Directory -Force -Path $distBin | Out-Null
+          Add-Content -Path $env:GITHUB_ENV -Value "BUILD_VERSION=$version"
 
           $exeCandidates = @(
             "build/NoveoDesktop.exe",
@@ -123,26 +124,121 @@ jobs:
             throw "Packaging cleanup failed"
           }
 
-      - name: Package zip
+      - name: Package zip and diff zip
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $version = "1.4.0.0"
+          $ErrorActionPreference = "Stop"
+          $version = "$env:BUILD_VERSION"
           $zipName = "build_$version.zip"
+          $diffZipName = "build_${version}_diff.zip"
+          $distRoot = "dist/build_$version"
+          $diffRoot = "dist/build_${version}_diff"
+          $baselineZip = "baseline_build_$version.zip"
+          $baselineDir = "baseline_build_$version"
+
           if (Test-Path $zipName) { Remove-Item $zipName -Force }
-          Compress-Archive -Path "dist/build_$version/*" -DestinationPath $zipName -CompressionLevel Optimal
+          if (Test-Path $diffZipName) { Remove-Item $diffZipName -Force }
+          if (Test-Path $diffRoot) { Remove-Item $diffRoot -Recurse -Force }
+          if (Test-Path $baselineZip) { Remove-Item $baselineZip -Force }
+          if (Test-Path $baselineDir) { Remove-Item $baselineDir -Recurse -Force }
+
+          Compress-Archive -Path "$distRoot/*" -DestinationPath $zipName -CompressionLevel Optimal
           Get-Item $zipName | Select-Object FullName, Length | Format-Table -AutoSize
 
-      - name: Upload artifact
+          $headers = @{
+            Authorization = "Bearer $env:GITHUB_TOKEN"
+            Accept = "application/vnd.github+json"
+            "X-GitHub-Api-Version" = "2022-11-28"
+          }
+          $releases = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/bargmy/NoveoCPP/releases"
+          $baselineRelease = $releases | Where-Object {
+            $_.tag_name -ne 'ssl' -and $_.draft -eq $false -and $_.prerelease -eq $false
+          } | Sort-Object {[datetime]$_.published_at} -Descending | Select-Object -First 1
+
+          $baselineAsset = $null
+          if ($baselineRelease) {
+            $baselineAsset = $baselineRelease.assets | Where-Object { $_.name -eq $zipName } | Select-Object -First 1
+          }
+
+          New-Item -ItemType Directory -Force -Path $diffRoot | Out-Null
+          $currentRootResolved = (Resolve-Path $distRoot).Path
+
+          if ($baselineAsset) {
+            Write-Host "Using baseline release $($baselineRelease.tag_name) asset $($baselineAsset.name)"
+            Invoke-WebRequest -Uri $baselineAsset.browser_download_url -OutFile $baselineZip
+            Expand-Archive -Path $baselineZip -DestinationPath $baselineDir -Force
+            $baselineRootResolved = (Resolve-Path $baselineDir).Path
+
+            $changedCount = 0
+            Get-ChildItem -Path $distRoot -Recurse -File | ForEach-Object {
+              $currentFile = $_
+              $relative = $currentFile.FullName.Substring($currentRootResolved.Length).TrimStart('\','/')
+              $baselineFile = Join-Path $baselineRootResolved $relative
+              $copyFile = $false
+
+              if (-not (Test-Path $baselineFile)) {
+                $copyFile = $true
+              } else {
+                $currentHash = (Get-FileHash -Path $currentFile.FullName -Algorithm SHA256).Hash
+                $baselineHash = (Get-FileHash -Path $baselineFile -Algorithm SHA256).Hash
+                if ($currentHash -ne $baselineHash) {
+                  $copyFile = $true
+                }
+              }
+
+              if ($copyFile) {
+                $targetPath = Join-Path $diffRoot $relative
+                $targetDir = Split-Path -Path $targetPath -Parent
+                if (-not (Test-Path $targetDir)) {
+                  New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+                }
+                Copy-Item $currentFile.FullName $targetPath -Force
+                $changedCount += 1
+                Write-Host "Diff includes: $relative"
+              }
+            }
+          } else {
+            Write-Host "No baseline release asset found for $zipName; creating executable-only diff package"
+            Copy-Item "$distRoot/NoveoDesktop.exe" "$diffRoot/NoveoDesktop.exe" -Force
+            $changedCount = 1
+            Write-Host "Diff includes: NoveoDesktop.exe"
+          }
+
+          $diffFiles = Get-ChildItem -Path $diffRoot -Recurse -File -ErrorAction SilentlyContinue
+          if ($diffFiles) {
+            Compress-Archive -Path "$diffRoot/*" -DestinationPath $diffZipName -CompressionLevel Optimal
+            Get-Item $diffZipName | Select-Object FullName, Length | Format-Table -AutoSize
+            Add-Content -Path $env:GITHUB_ENV -Value "DIFF_ZIP_EXISTS=true"
+            Add-Content -Path $env:GITHUB_ENV -Value "DIFF_ZIP_NAME=$diffZipName"
+          } else {
+            Write-Host "No changed files detected; diff zip will be skipped"
+            Add-Content -Path $env:GITHUB_ENV -Value "DIFF_ZIP_EXISTS=false"
+            Add-Content -Path $env:GITHUB_ENV -Value "DIFF_ZIP_NAME=$diffZipName"
+          }
+
+      - name: Upload full artifact
         uses: actions/upload-artifact@v4
         with:
           name: build_1.4.0.0_windows
           path: build_1.4.0.0.zip
 
-      - name: Publish release asset on tag
+      - name: Upload diff artifact
+        if: env.DIFF_ZIP_EXISTS == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: build_1.4.0.0_windows_diff
+          path: ${{ env.DIFF_ZIP_NAME }}
+
+      - name: Publish release assets on tag
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: build_1.4.0.0.zip
+          files: |
+            build_1.4.0.0.zip
+            ${{ env.DIFF_ZIP_NAME }}
+          fail_on_unmatched_files: false
 
       - name: Upload release zip to Telegram
         shell: pwsh
@@ -156,3 +252,17 @@ jobs:
             -F "chat_id=$env:TG_CHANNEL_ID" `
             -F "caption=$caption" `
             -F "document=@build_1.4.0.0.zip"
+
+      - name: Upload diff zip to Telegram
+        if: env.DIFF_ZIP_EXISTS == 'true'
+        shell: pwsh
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          TG_CHANNEL_ID: ${{ secrets.TG_CHANNEL_ID }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $caption = "NoveoCPP diff ${{ github.ref_name }}"
+          curl.exe -sS -X POST "https://api.telegram.org/bot$env:BOT_TOKEN/sendDocument" `
+            -F "chat_id=$env:TG_CHANNEL_ID" `
+            -F "caption=$caption" `
+            -F "document=@${env:DIFF_ZIP_NAME}"
