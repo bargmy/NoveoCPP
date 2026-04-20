@@ -80,24 +80,37 @@ jobs:
 
           & "C:/Qt/5.15.2/msvc2019_64/bin/windeployqt.exe" --release --compiler-runtime "$distBin/NoveoDesktop.exe"
 
-          $opensslCandidates = @(
-            "C:/Program Files/OpenSSL-Win64/bin/libssl-1_1-x64.dll",
-            "C:/Program Files/OpenSSL-Win64/bin/libcrypto-1_1-x64.dll",
-            "C:/Program Files/OpenSSL/bin/libssl-1_1-x64.dll",
-            "C:/Program Files/OpenSSL/bin/libcrypto-1_1-x64.dll"
-          )
+          $searchRoots = @(
+            'C:/Program Files',
+            'C:/Program Files (x86)',
+            'C:/tools',
+            'C:/ProgramData/chocolatey'
+          ) | Where-Object { Test-Path $_ }
 
-          $sslDll = $opensslCandidates | Where-Object { $_ -like '*libssl-1_1-x64.dll' -and (Test-Path $_) } | Select-Object -First 1
-          $cryptoDll = $opensslCandidates | Where-Object { $_ -like '*libcrypto-1_1-x64.dll' -and (Test-Path $_) } | Select-Object -First 1
+          Write-Host "Searching OpenSSL DLLs under:"
+          $searchRoots | ForEach-Object { Write-Host $_ }
+
+          $sslMatches = foreach ($root in $searchRoots) {
+            Get-ChildItem -Path $root -Recurse -File -Filter 'libssl-1_1-x64.dll' -ErrorAction SilentlyContinue
+          }
+          $cryptoMatches = foreach ($root in $searchRoots) {
+            Get-ChildItem -Path $root -Recurse -File -Filter 'libcrypto-1_1-x64.dll' -ErrorAction SilentlyContinue
+          }
+
+          Write-Host "libssl matches:"
+          $sslMatches | Select-Object FullName, Length | Format-Table -AutoSize
+          Write-Host "libcrypto matches:"
+          $cryptoMatches | Select-Object FullName, Length | Format-Table -AutoSize
+
+          $sslDll = $sslMatches | Select-Object -First 1
+          $cryptoDll = $cryptoMatches | Select-Object -First 1
 
           if (-not $sslDll -or -not $cryptoDll) {
-            Write-Host "Checked OpenSSL DLL candidates:"
-            $opensslCandidates | ForEach-Object { Write-Host $_ }
             throw "Required OpenSSL runtime DLLs were not found"
           }
 
-          Copy-Item $sslDll "$distBin/libssl-1_1-x64.dll" -Force
-          Copy-Item $cryptoDll "$distBin/libcrypto-1_1-x64.dll" -Force
+          Copy-Item $sslDll.FullName "$distBin/libssl-1_1-x64.dll" -Force
+          Copy-Item $cryptoDll.FullName "$distBin/libcrypto-1_1-x64.dll" -Force
           Write-Host "Bundled OpenSSL DLLs:"
           Get-Item "$distBin/libssl-1_1-x64.dll", "$distBin/libcrypto-1_1-x64.dll" | Select-Object FullName, Length | Format-Table -AutoSize
 
