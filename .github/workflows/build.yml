@@ -57,7 +57,16 @@ jobs:
           $distBin = "$distRoot"
           New-Item -ItemType Directory -Force -Path $distBin | Out-Null
 
-          Copy-Item "build/Release/NoveoDesktop.exe" "$distBin/NoveoDesktop.exe" -Force
+          $exeCandidates = @(
+            "build/NoveoDesktop.exe",
+            "build/Release/NoveoDesktop.exe"
+          )
+          $exePath = $exeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $exePath) {
+            throw "NoveoDesktop.exe not found. Checked: $($exeCandidates -join ', ')"
+          }
+
+          Copy-Item $exePath "$distBin/NoveoDesktop.exe" -Force
           if (Test-Path "web_assets") {
             Copy-Item "web_assets" "$distRoot/web_assets" -Recurse -Force
           }
