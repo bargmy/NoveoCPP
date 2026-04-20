@@ -38,6 +38,12 @@ jobs:
         run: |
           aqt install-qt -O C:\Qt windows desktop 5.15.2 win64_msvc2019_64
 
+      - name: Validate backend endpoints
+        shell: pwsh
+        run: |
+          if (Select-String -Path "MainWindow.cpp","WebSocketClient.cpp" -Pattern "pcpapc172" -SimpleMatch -Quiet) {
+            throw "Found deprecated backend domain 'pcpapc172' in source files"
+          }
       - name: Configure
         shell: pwsh
         run: |

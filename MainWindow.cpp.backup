@@ -32,7 +32,7 @@
 
 // Custom role to store the avatar URL in items for updating later
 const int AvatarUrlRole = Qt::UserRole + 10;
-const QString API_BASE_URL = "https://api.pcpapc172.ir:8443";
+const QString API_BASE_URL = "https://noveo.ir:8443";
 
 // ==========================================
 // 1. USERLISTDELEGATE IMPL
