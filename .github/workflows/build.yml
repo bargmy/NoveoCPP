@@ -98,3 +98,17 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: build_1.4.0.0.zip
+
+      - name: Upload release zip to Telegram
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          TG_CHANNEL_ID: ${{ secrets.TG_CHANNEL_ID }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $caption = "NoveoCPP release ${{ github.ref_name }}"
+          curl.exe -sS -X POST "https://api.telegram.org/bot$env:BOT_TOKEN/sendDocument" `
+            -F "chat_id=$env:TG_CHANNEL_ID" `
+            -F "caption=$caption" `
+            -F "document=@build_1.4.0.0.zip"
