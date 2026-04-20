@@ -81,7 +81,7 @@ jobs:
 
           Write-Host "Files matched for removal before packaging:"
           $filesToRemove = Get-ChildItem -Path $distRoot -Recurse -File | Where-Object {
-            $_.Name -like 'vcredist*.exe' -or $_.Name -eq 'opengl32.dll' -or $_.Name -eq 'opengl32sw.dll'
+            $_.Name -like 'vcredist*.exe' -or $_.Name -like 'vc_redist*.exe' -or $_.Name -eq 'opengl32.dll' -or $_.Name -eq 'opengl32sw.dll'
           }
           $filesToRemove | Select-Object FullName, Length | Format-Table -AutoSize
 
@@ -90,7 +90,7 @@ jobs:
           }
 
           $remainingForbidden = Get-ChildItem -Path $distRoot -Recurse -File | Where-Object {
-            $_.Name -like 'vcredist*.exe' -or $_.Name -eq 'opengl32.dll' -or $_.Name -eq 'opengl32sw.dll'
+            $_.Name -like 'vcredist*.exe' -or $_.Name -like 'vc_redist*.exe' -or $_.Name -eq 'opengl32.dll' -or $_.Name -eq 'opengl32sw.dll'
           }
 
           if ($remainingForbidden) {
