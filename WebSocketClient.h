@@ -54,11 +54,16 @@ private slots:
     void onConnected();
     void onTextMessageReceived(QString message);
     void onSslErrors(const QList<QSslError>& errors);
+    void onSocketError(QAbstractSocket::SocketError error);
+    void onStateChanged(QAbstractSocket::SocketState state);
 
 private:
     QWebSocket m_webSocket;
     User m_currentUser;
     QString m_token;
+
+    QString socketStateToString(QAbstractSocket::SocketState state) const;
+    QString socketErrorToString(QAbstractSocket::SocketError error) const;
 
     void handleLoginSuccess(const QJsonObject& data);
     void handleChatHistory(const QJsonObject& data);
