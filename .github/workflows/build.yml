@@ -38,23 +38,17 @@ jobs:
           set -e
 
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            # Find latest v*-style tag (vMAJOR.MINOR.PATCH.BUILD)
             latest=$(git tag -l "v*" --sort=-v:refname | head -n 1)
 
             if [ -z "$latest" ]; then
-              # First tag ever
               new="v1.0.0.0"
             else
               base=${latest#v}
-
-              # Parse up to 4 numeric components; default BUILD to 0 if missing
               IFS='.' read -r MAJOR MINOR PATCH BUILD <<< "$base"
               : "${BUILD:=0}"
 
               echo "Latest tag: $latest -> ${MAJOR}.${MINOR}.${PATCH}.${BUILD}"
 
-              # Detect code changes since last tag, ignoring non-code files
-              # (CMakeLists.txt, version.rc, README.md, icon.png, icon.ico, workflows)
               changed_files=$(git diff --name-only "$latest"..HEAD | \
                 grep -vE '^(CMakeLists\.txt|version\.rc|README\.md|icon\.png|icon\.ico|\.github/workflows/.*)$' || true)
 
@@ -68,11 +62,9 @@ jobs:
               fi
 
               if [ "$CODE_CHANGED" -eq 1 ]; then
-                # Code changed: bump PATCH, reset BUILD to 0 (e.g. 1.2.0.3 -> 1.2.1.0)
                 PATCH=$((PATCH + 1))
                 BUILD=0
 
-                # Same rollover rules as before: PATCH>15 → MINOR+1, PATCH=0; MINOR>99 → MAJOR+1, MINOR=0
                 if [ "$PATCH" -gt 15 ]; then
                   PATCH=0
                   MINOR=$((MINOR + 1))
@@ -83,7 +75,6 @@ jobs:
                   MAJOR=$((MAJOR + 1))
                 fi
               else
-                # No code changes: keep PATCH, bump BUILD (e.g. 1.2.0.3 -> 1.2.0.4)
                 BUILD=$((BUILD + 1))
               fi
 
@@ -106,14 +97,13 @@ jobs:
 
             echo "new_version=$new" >> $GITHUB_OUTPUT
           else
-            # Release event: just use the tag that triggered the workflow
             refname=${GITHUB_REF##*/}
             echo "Release event -> using tag: $refname"
             echo "new_version=$refname" >> $GITHUB_OUTPUT
           fi
 
   # =========================================================
-  # WINDOWS BUILD (Manual Copy, uses 4-part version)
+  # WINDOWS BUILD
   # =========================================================
   build-windows:
     needs: prepare
@@ -146,7 +136,6 @@ jobs:
         run: |
           set -e
 
-          # 1. Update version.rc from tag (vMAJOR.MINOR.PATCH.BUILD)
           VER_NO_V=${VERSION#v}
           IFS='.' read -r MAJOR MINOR PATCH BUILD <<< "$VER_NO_V"
           RC_NUM="${MAJOR},${MINOR},${PATCH},${BUILD}"
@@ -163,7 +152,6 @@ jobs:
             echo "WARNING: version.rc not found."
           fi
 
-          # 2. Clean stale in-source CMake artifacts and build out-of-source
           export PATH="$MINGW_BIN:$QT_ROOT/bin:$PATH"
           rm -rf build
           rm -rf CMakeFiles
@@ -172,7 +160,6 @@ jobs:
           cmake --build build
           cd build
 
-          # 3. MANUAL DEPLOYMENT
           echo "Executing manual DLL deployment..."
           cp "$QT_ROOT/bin/Qt5Core.dll" .
           cp "$QT_ROOT/bin/Qt5Gui.dll" .
@@ -186,11 +173,9 @@ jobs:
           mkdir -p platforms
           cp "$QT_ROOT/plugins/platforms/qwindows.dll" platforms/
 
-          # 4. Download OpenSSL
           curl -L -o libssl-1_1-x64.dll http://hienob.bargmy.ir/openssl/libssl-1_1-x64.dll
           curl -L -o libcrypto-1_1-x64.dll http://hienob.bargmy.ir/openssl/libcrypto-1_1-x64.dll
 
-          # 5. Zip
           ZIP_NAME="NoveoDesktop_${VERSION}_${DATE}_x64_Windows.zip"
           7z a "$ZIP_NAME" * -xr!*.obj -xr!*.cpp -xr!*.h -xr!Makefile -xr!CMakeFiles -xr!*_autogen
 
@@ -206,14 +191,18 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Windows EXE to Telegram
-        if: ${{ secrets.BOT_TOKEN != '' && secrets.TG_CHANNEL_ID != '' }}
         shell: bash
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           TG_CHANNEL_ID: ${{ secrets.TG_CHANNEL_ID }}
           VERSION: ${{ needs.prepare.outputs.new_version }}
+          WIN_EXE: ${{ env.WIN_EXE }}
         run: |
           set -e
+          if [ -z "$BOT_TOKEN" ] || [ -z "$TG_CHANNEL_ID" ]; then
+            echo "Telegram secrets are missing, skipping EXE upload."
+            exit 0
+          fi
           test -f "$WIN_EXE"
           curl --fail --silent --show-error \
             -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument" \
@@ -222,7 +211,7 @@ jobs:
             -F caption="NoveoDesktop ${VERSION} Windows executable"
 
   # =========================================================
-  # LINUX BUILD (uses icon.png 512x512 from repo root)
+  # LINUX BUILD
   # =========================================================
   build-linux:
     needs: prepare
@@ -264,13 +253,11 @@ jobs:
           cmake .. -DCMAKE_BUILD_TYPE=Release
           cmake --build .
 
-          # Prepare AppDir
           mkdir -p AppDir/usr/bin
           mkdir -p AppDir/usr/share/applications
           mkdir -p AppDir/usr/share/icons/hicolor/512x512/apps/
           cp NoveoDesktop AppDir/usr/bin/
 
-          # Icon: ONLY use icon.png from repo root (expected 512x512)
           if [ -f "../icon.png" ]; then
             echo "Using icon.png from repo root..."
             cp "../icon.png" AppDir/usr/share/icons/hicolor/512x512/apps/noveodesktop.png
@@ -278,7 +265,6 @@ jobs:
             echo "WARNING: icon.png not found in repo root, continuing without custom icon."
           fi
 
-          # Desktop file with Icon name matching noveodesktop.png (without extension)
           cat > AppDir/usr/share/applications/NoveoDesktop.desktop << 'EOF'
           [Desktop Entry]
           Type=Application
@@ -288,7 +274,6 @@ jobs:
           Categories=Utility;
           EOF
 
-          # Package AppDir as tar.gz
           LINUX_TAR="NoveoDesktop_${VERSION}_${DATE}_x64_Linux.tar.gz"
           tar czf "$LINUX_TAR" AppDir
 
