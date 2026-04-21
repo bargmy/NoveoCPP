@@ -16,8 +16,63 @@ enum class MessageStatus {
 struct User {
     QString userId;
     QString username;
+    QString displayName;
+    QString alias;
+    QString handle;
+    QString bio;
     QString avatarUrl;
     bool online;
+};
+
+struct Contact {
+    QString userId;
+    QString username;
+    QString displayName;
+    QString alias;
+    QString avatarUrl;
+    bool isContact = false;
+};
+
+struct Gift {
+    QString giftId;
+    QString name;
+    QString imageUrl;
+    int quantity = 1;
+    QString priceLabel;
+};
+
+struct GroupInfo {
+    QString groupId;
+    QString name;
+    int memberCount = 0;
+    bool isMutual = false;
+};
+
+struct WalletTransaction {
+    QString id;
+    QString description;
+    QString type;
+    double amountTenths = 0.0;
+    qint64 createdAt = 0;
+};
+
+struct WalletOverview {
+    double balanceTenths = 0.0;
+    std::vector<WalletTransaction> transactions;
+};
+
+struct UserProfile {
+    QString userId;
+    QString username;
+    QString displayName;
+    QString handle;
+    QString bio;
+    QString avatarUrl;
+    qint64 createdAt = 0;
+    std::vector<Gift> gifts;
+    std::vector<GroupInfo> groups;
+    std::vector<GroupInfo> mutualGroups;
+    WalletOverview wallet;
 };
 
 struct Message {

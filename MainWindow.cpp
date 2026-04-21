@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "SettingsDialog.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -35,6 +36,12 @@
 #include <QDialog>
 #include <QPlainTextEdit>
 #include <QShortcut>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QComboBox>
+#include <QDateTime>
+#include <cmath>
 
 const int AvatarUrlRole = Qt::UserRole + 10;
 const QString API_BASE_URL = "https://noveo.ir:8443";
@@ -539,6 +546,9 @@ MainWindow::MainWindow(QWidget* parent)
     QSettings settings("Noveo", "MessengerClient");
     m_isDarkMode = settings.value("darkMode", false).toBool();
     m_notificationsEnabled = settings.value("notificationsEnabled", true).toBool();
+    m_followSystemAppearance = settings.value("followSystemAppearance", false).toBool();
+    m_compactDensity = settings.value("compactDensity", false).toBool();
+    m_themePreset = settings.value("themePreset", "Default").toString();
 
     setupUi();
     applyTheme();
@@ -570,6 +580,12 @@ MainWindow::~MainWindow() {}
 
 void MainWindow::resizeEvent(QResizeEvent* event) {
     QMainWindow::resizeEvent(event);
+    if (!m_sidebarDrawer) return;
+    if (width() < 980 && m_contentStack && m_contentStack->currentIndex() != 0) {
+        m_sidebarDrawer->hide();
+    } else if (width() >= 980) {
+        m_sidebarDrawer->show();
+    }
 }
 
 void MainWindow::setupUi() {
@@ -612,14 +628,9 @@ void MainWindow::setupUi() {
 
     // App Page
     m_appPage = new QWidget();
-    QHBoxLayout* appLayout = new QHBoxLayout(m_appPage);
+    QVBoxLayout* appLayout = new QVBoxLayout(m_appPage);
     appLayout->setContentsMargins(0, 0, 0, 0);
     appLayout->setSpacing(0);
-
-    // Sidebar
-    m_sidebarTabs = new QTabWidget();
-    m_sidebarTabs->setFixedWidth(300);
-    m_sidebarTabs->setTabPosition(QTabWidget::South);
 
     m_chatListWidget = new QListWidget();
     m_chatListWidget->setIconSize(QSize(42, 42));
@@ -631,37 +642,79 @@ void MainWindow::setupUi() {
     m_contactListWidget->setItemDelegate(new UserListDelegate(this));
     m_contactListWidget->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
-    m_settingsTab = new QWidget();
-    QVBoxLayout* settingsLayout = new QVBoxLayout(m_settingsTab);
+    // App header with hamburger like web menu button
+    m_appHeader = new QWidget();
+    m_appHeader->setObjectName("appHeader");
+    m_appHeader->setFixedHeight(56);
+    auto* appHeaderLayout = new QHBoxLayout(m_appHeader);
+    appHeaderLayout->setContentsMargins(10, 4, 10, 4);
+    appHeaderLayout->setSpacing(8);
+    m_menuBtn = new QPushButton("☰");
+    m_menuBtn->setObjectName("menuBtn");
+    m_menuBtn->setFixedSize(38, 38);
+    m_headerTitle = new QLabel("Chats");
+    m_headerTitle->setStyleSheet("font-weight:700;font-size:16px;");
+    appHeaderLayout->addWidget(m_menuBtn);
+    appHeaderLayout->addWidget(m_headerTitle);
+    appHeaderLayout->addStretch();
+    appLayout->addWidget(m_appHeader);
 
-    QCheckBox* darkModeCheck = new QCheckBox("Dark Mode");
-    darkModeCheck->setChecked(m_isDarkMode);
-    connect(darkModeCheck, &QCheckBox::toggled, this, &MainWindow::onDarkModeToggled);
+    QWidget* body = new QWidget();
+    QHBoxLayout* bodyLayout = new QHBoxLayout(body);
+    bodyLayout->setContentsMargins(0, 0, 0, 0);
+    bodyLayout->setSpacing(0);
+    appLayout->addWidget(body, 1);
 
-    m_notificationsCheck = new QCheckBox("Notifications");
-    m_notificationsCheck->setChecked(m_notificationsEnabled);
-    connect(m_notificationsCheck, &QCheckBox::toggled, this, &MainWindow::onNotificationsToggled);
+    // Sidebar drawer inspired by web app
+    m_sidebarDrawer = new QWidget();
+    m_sidebarDrawer->setObjectName("sidebarShell");
+    m_sidebarDrawer->setMinimumWidth(300);
+    m_sidebarDrawer->setMaximumWidth(340);
+    QVBoxLayout* sidebarLayout = new QVBoxLayout(m_sidebarDrawer);
+    sidebarLayout->setContentsMargins(12, 12, 12, 12);
+    sidebarLayout->setSpacing(10);
 
-    QPushButton* logoutBtn = new QPushButton("Log Out");
-    connect(logoutBtn, &QPushButton::clicked, this, &MainWindow::onLogoutClicked);
+    m_sidebarIdentityWidget = new QWidget();
+    m_sidebarIdentityWidget->setObjectName("sidebarIdentity");
+    QHBoxLayout* identityLayout = new QHBoxLayout(m_sidebarIdentityWidget);
+    identityLayout->setContentsMargins(10, 10, 10, 10);
+    m_sidebarAvatar = new QLabel();
+    m_sidebarAvatar->setFixedSize(42, 42);
+    m_sidebarAvatar->setAlignment(Qt::AlignCenter);
+    m_sidebarDisplayName = new QLabel("Not signed in");
+    m_sidebarDisplayName->setObjectName("sidebarDisplayName");
+    m_sidebarHandle = new QLabel("@");
+    m_sidebarHandle->setObjectName("sidebarHandle");
+    QVBoxLayout* identityText = new QVBoxLayout();
+    identityText->addWidget(m_sidebarDisplayName);
+    identityText->addWidget(m_sidebarHandle);
+    identityLayout->addWidget(m_sidebarAvatar);
+    identityLayout->addLayout(identityText, 1);
 
-    QPushButton* devConsoleBtn = new QPushButton("Developer Console");
-    connect(devConsoleBtn, &QPushButton::clicked, this, &MainWindow::onOpenDeveloperConsole);
+    m_sidebarNavList = new QListWidget();
+    m_sidebarNavList->setObjectName("sidebarNav");
+    m_sidebarNavList->setFixedHeight(230);
+    const QStringList nav = { "Chats", "Contacts", "Profile", "Groups", "Gifts", "Stars", "Settings" };
+    for (int i = 0; i < nav.size(); ++i) {
+        auto* item = new QListWidgetItem(nav[i], m_sidebarNavList);
+        item->setData(Qt::UserRole, i);
+    }
+    m_sidebarNavList->setCurrentRow(0);
 
-    settingsLayout->addWidget(new QLabel("Settings"));
-    settingsLayout->addWidget(darkModeCheck);
-    settingsLayout->addWidget(m_notificationsCheck);
-    settingsLayout->addWidget(devConsoleBtn);
-    settingsLayout->addStretch();
-    settingsLayout->addWidget(logoutBtn);
-    settingsLayout->addSpacing(20);
+    m_sidebarSections = new QStackedWidget();
+    m_sidebarSections->addWidget(m_chatListWidget);      // Chats
+    m_sidebarSections->addWidget(m_contactListWidget);   // Contacts
+    for (int i = 0; i < 4; ++i) {
+        auto* stub = new QLabel(i == 0 ? "Profile" : i == 1 ? "Groups" : i == 2 ? "Gifts" : "Stars");
+        stub->setAlignment(Qt::AlignCenter);
+        m_sidebarSections->addWidget(stub);
+    }
 
     QShortcut* devConsoleShortcut = new QShortcut(QKeySequence("Ctrl+Shift+I"), this);
     connect(devConsoleShortcut, &QShortcut::activated, this, &MainWindow::onOpenDeveloperConsole);
-
-    m_sidebarTabs->addTab(m_chatListWidget, "Chats");
-    m_sidebarTabs->addTab(m_contactListWidget, "Contacts");
-    m_sidebarTabs->addTab(m_settingsTab, "Settings");
+    sidebarLayout->addWidget(m_sidebarIdentityWidget);
+    sidebarLayout->addWidget(m_sidebarNavList);
+    sidebarLayout->addWidget(m_sidebarSections, 1);
 
     // Chat Area
     m_chatAreaWidget = new QWidget();
@@ -766,8 +819,108 @@ void MainWindow::setupUi() {
     chatAreaLayout->addWidget(m_editBar);
     chatAreaLayout->addWidget(inputArea);
 
-    appLayout->addWidget(m_sidebarTabs);
-    appLayout->addWidget(m_chatAreaWidget);
+    // Real content pages for non-chat sections
+    m_contactsPage = new QWidget();
+    auto* contactsPageLayout = new QVBoxLayout(m_contactsPage);
+    m_contactPageTitle = new QLabel("Select a contact");
+    m_contactPageTitle->setStyleSheet("font-size:20px;font-weight:700;");
+    m_contactPageSubtitle = new QLabel("Open contact profiles and start private chats.");
+    m_contactPageSubtitle->setWordWrap(true);
+    auto* cButtons = new QHBoxLayout();
+    m_contactMessageBtn = new QPushButton("Message");
+    m_contactProfileBtn = new QPushButton("Open Profile");
+    m_contactMessageBtn->setEnabled(false);
+    m_contactProfileBtn->setEnabled(false);
+    cButtons->addWidget(m_contactMessageBtn);
+    cButtons->addWidget(m_contactProfileBtn);
+    cButtons->addStretch();
+    contactsPageLayout->addWidget(m_contactPageTitle);
+    contactsPageLayout->addWidget(m_contactPageSubtitle);
+    contactsPageLayout->addLayout(cButtons);
+    contactsPageLayout->addWidget(new QLabel("Contacts"));
+    auto* allContacts = new QListWidget();
+    allContacts->setObjectName("allContactsPageList");
+    contactsPageLayout->addWidget(allContacts, 1);
+
+    m_profilePage = new QWidget();
+    auto* profileLayout = new QVBoxLayout(m_profilePage);
+    m_profileNameLabel = new QLabel("No profile loaded");
+    m_profileNameLabel->setStyleSheet("font-size:22px;font-weight:700;");
+    m_profileHandleLabel = new QLabel("@");
+    m_profileBioLabel = new QLabel("No bio yet.");
+    m_profileBioLabel->setWordWrap(true);
+    m_profileJoinedLabel = new QLabel();
+    auto* refreshProfileBtn = new QPushButton("Refresh");
+    connect(refreshProfileBtn, &QPushButton::clicked, this, &MainWindow::onRefreshProfile);
+    profileLayout->addWidget(m_profileNameLabel);
+    profileLayout->addWidget(m_profileHandleLabel);
+    profileLayout->addWidget(m_profileBioLabel);
+    profileLayout->addWidget(m_profileJoinedLabel);
+    profileLayout->addWidget(refreshProfileBtn, 0, Qt::AlignLeft);
+    profileLayout->addStretch();
+
+    m_groupsPage = new QWidget();
+    auto* groupsPageLayout = new QVBoxLayout(m_groupsPage);
+    groupsPageLayout->addWidget(new QLabel("Groups & mutual groups"));
+    m_groupsListWidget = new QListWidget();
+    groupsPageLayout->addWidget(m_groupsListWidget);
+
+    m_giftsPage = new QWidget();
+    auto* giftsPageLayout = new QVBoxLayout(m_giftsPage);
+    giftsPageLayout->addWidget(new QLabel("Gifts"));
+    m_giftsListWidget = new QListWidget();
+    giftsPageLayout->addWidget(m_giftsListWidget);
+
+    m_starsPage = new QWidget();
+    auto* starsPageLayout = new QVBoxLayout(m_starsPage);
+    m_walletBalanceLabel = new QLabel("0.00 Stars");
+    m_walletBalanceLabel->setStyleSheet("font-size:22px;font-weight:700;");
+    m_walletSummaryLabel = new QLabel("Wallet overview");
+    m_walletTxListWidget = new QListWidget();
+    starsPageLayout->addWidget(m_walletBalanceLabel);
+    starsPageLayout->addWidget(m_walletSummaryLabel);
+    starsPageLayout->addWidget(m_walletTxListWidget);
+
+    m_chatPage = m_chatAreaWidget;
+    m_contentStack = new QStackedWidget();
+    m_contentStack->addWidget(m_chatPage);      // 0
+    m_contentStack->addWidget(m_contactsPage);  // 1
+    m_contentStack->addWidget(m_profilePage);   // 2
+    m_contentStack->addWidget(m_groupsPage);    // 3
+    m_contentStack->addWidget(m_giftsPage);     // 4
+    m_contentStack->addWidget(m_starsPage);     // 5
+
+    bodyLayout->addWidget(m_sidebarDrawer);
+    bodyLayout->addWidget(m_contentStack, 1);
+
+    // Settings popup/sheet style
+    m_settingsDialog = new SettingsDialog(this);
+    connect(m_settingsDialog, &SettingsDialog::darkModeChanged, this, &MainWindow::onDarkModeToggled);
+    connect(m_settingsDialog, &SettingsDialog::followSystemChanged, this, [this](bool enabled) {
+        m_followSystemAppearance = enabled;
+        QSettings s("Noveo", "MessengerClient");
+        s.setValue("followSystemAppearance", m_followSystemAppearance);
+        if (enabled) {
+            m_isDarkMode = palette().color(QPalette::Window).lightness() < 128;
+            s.setValue("darkMode", m_isDarkMode);
+        }
+        applyTheme();
+    });
+    connect(m_settingsDialog, &SettingsDialog::compactModeChanged, this, [this](bool enabled) {
+        m_compactDensity = enabled;
+        QSettings s("Noveo", "MessengerClient");
+        s.setValue("compactDensity", m_compactDensity);
+        applyTheme();
+    });
+    connect(m_settingsDialog, &SettingsDialog::themePresetChanged, this, [this](const QString& preset) {
+        m_themePreset = preset;
+        QSettings s("Noveo", "MessengerClient");
+        s.setValue("themePreset", m_themePreset);
+        applyTheme();
+    });
+    connect(m_settingsDialog, &SettingsDialog::notificationsChanged, this, &MainWindow::onNotificationsToggled);
+    connect(m_settingsDialog, &SettingsDialog::logoutRequested, this, &MainWindow::onLogoutClicked);
+    connect(m_settingsDialog, &SettingsDialog::developerConsoleRequested, this, &MainWindow::onOpenDeveloperConsole);
 
     m_stackedWidget->addWidget(m_appPage);
 
@@ -777,31 +930,75 @@ void MainWindow::setupUi() {
     connect(m_contactListWidget, &QListWidget::itemClicked, this, &MainWindow::onContactSelected);
     connect(m_sendBtn, &QPushButton::clicked, this, &MainWindow::onSendBtnClicked);
     connect(m_messageInput, &QLineEdit::returnPressed, this, &MainWindow::onSendBtnClicked);
+    connect(m_sidebarNavList, &QListWidget::itemSelectionChanged, this, &MainWindow::onSidebarSectionChanged);
+    connect(m_menuBtn, &QPushButton::clicked, this, &MainWindow::onMenuButtonClicked);
+    connect(m_contactProfileBtn, &QPushButton::clicked, this, &MainWindow::onOpenProfileFromContact);
+    connect(m_contactMessageBtn, &QPushButton::clicked, this, [this]() {
+        for (int i = 0; i < m_contactListWidget->count(); ++i) {
+            auto* item = m_contactListWidget->item(i);
+            if (item->data(Qt::UserRole).toString() == m_selectedContactUserId) {
+                onContactSelected(item);
+                return;
+            }
+        }
+    });
+    connect(m_contactListWidget, &QListWidget::itemClicked, this, [this, allContacts](QListWidgetItem* src) {
+        if (!src) return;
+        m_selectedContactUserId = src->data(Qt::UserRole).toString();
+        m_contactPageTitle->setText(src->text());
+        m_contactPageSubtitle->setText("Open profile or start a private chat.");
+        m_contactMessageBtn->setEnabled(true);
+        m_contactProfileBtn->setEnabled(true);
+        bool exists = false;
+        for (int i = 0; i < allContacts->count(); ++i) {
+            if (allContacts->item(i)->data(Qt::UserRole).toString() == m_selectedContactUserId) {
+                allContacts->setCurrentRow(i);
+                exists = true;
+                break;
+            }
+        }
+        if (!exists) {
+            auto* clone = src->clone();
+            allContacts->addItem(clone);
+            allContacts->setCurrentItem(clone);
+        }
+    });
 }
 
 void MainWindow::applyTheme() {
-    QString bg = m_isDarkMode ? "#1e1e1e" : "#f5f5f5";
-    QString panelBg = m_isDarkMode ? "#2d2d2d" : "#ffffff";
+    const QString preset = m_themePreset;
+    QString bg = m_isDarkMode ? "#10141f" : "#f5f7fb";
+    QString panelBg = m_isDarkMode ? "#192132" : "#ffffff";
+    if (preset == "Sunset") {
+        bg = m_isDarkMode ? "#1c1220" : "#fff6f1";
+        panelBg = m_isDarkMode ? "#2b1c33" : "#ffffff";
+    } else if (preset == "Midnight") {
+        bg = "#0d111a";
+        panelBg = "#141b2d";
+    }
     QString text = m_isDarkMode ? "#ffffff" : "#000000";
-    QString border = m_isDarkMode ? "#3d3d3d" : "#e0e0e0";
+    QString border = m_isDarkMode ? "#2a3651" : "#e1e6f0";
     QString inputBg = m_isDarkMode ? "#3d3d3d" : "#ffffff";
-    QString listHover = m_isDarkMode ? "#3a3a3a" : "#f0f0f0";
+    QString listHover = m_isDarkMode ? "#25304b" : "#eef3ff";
     QString scrollHandle = m_isDarkMode ? "#505050" : "#c0c0c0";
     QString scrollHandleHover = m_isDarkMode ? "#606060" : "#a0a0a0";
 
+    const int listPadding = m_compactDensity ? 6 : 10;
     QString style = QString(
         "QMainWindow { background-color: %1; }"
         "QWidget { color: %3; }"
-        "QLineEdit { padding: 10px; border: 1px solid %4; border-radius: 5px; background-color: %5; color: %3; }"
-        "QPushButton { padding: 8px 15px; border-radius: 5px; background-color: #0088cc; color: white; border: none; }"
-        "QPushButton:hover { background-color: #0077b3; }"
+        "QLineEdit,QComboBox { padding: 10px; border: 1px solid %4; border-radius: 8px; background-color: %5; color: %3; }"
+        "QPushButton { padding: 8px 15px; border-radius: 8px; background-color: #2d7df6; color: white; border: none; }"
+        "QPushButton:hover { background-color: #2367cc; }"
         "QListWidget { background-color: %2; border: none; outline: none; }"
-        "QListWidget::item { padding: 10px; border-bottom: 1px solid %4; }"
-        "QListWidget::item:selected { background-color: #0088cc; color: white; }"
+        "QListWidget::item { padding: %9px; border-bottom: 1px solid %4; }"
+        "QListWidget::item:selected { background-color: #2d7df6; color: white; }"
         "QListWidget::item:hover { background-color: %6; }"
-        "QTabWidget::pane { border: none; }"
-        "QTabBar::tab { background: %2; color: %3; padding: 10px; min-width: 80px; }"
-        "QTabBar::tab:selected { border-bottom: 2px solid #0088cc; }"
+        "#sidebarIdentity,#sidebarShell { background-color: %2; border: 1px solid %4; border-radius: 12px; }"
+        "#sidebarDisplayName { font-size: 15px; font-weight: 700; }"
+        "#sidebarHandle { color: #94a3b8; font-size: 12px; }"
+        "#appHeader { background-color: %2; border-bottom:1px solid %4; }"
+        "#menuBtn { font-size: 18px; padding: 0px; }"
         "#chatHeader { background-color: %2; border-bottom: 1px solid %4; }"
         "#inputArea { background-color: %2; border-top: 1px solid %4; }"
         "#chatList { background-color: %1; border: none; }"
@@ -812,8 +1009,8 @@ void MainWindow::applyTheme() {
         "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }"
         "QCheckBox { color: %3; spacing: 5px; }"
         "QCheckBox::indicator { width: 18px; height: 18px; border: 1px solid %4; border-radius: 4px; background: %5; }"
-        "QCheckBox::indicator:checked { background-color: #0088cc; border: 1px solid #0088cc; }"
-    ).arg(bg, panelBg, text, border, inputBg, listHover, scrollHandle, scrollHandleHover);
+        "QCheckBox::indicator:checked { background-color: #2d7df6; border: 1px solid #2d7df6; }"
+    ).arg(bg, panelBg, text, border, inputBg, listHover, scrollHandle, scrollHandleHover).arg(listPadding);
 
     setStyleSheet(style);
 
@@ -859,6 +1056,9 @@ void MainWindow::onLogoutClicked() {
     m_passwordInput->clear();
     m_chats.clear();
     m_users.clear();
+    m_contacts.clear();
+    m_profile = UserProfile{};
+    m_authToken.clear();
     m_currentChatId.clear();
     m_isLoadingHistory = false;
     m_avatarCache.clear();
@@ -866,8 +1066,12 @@ void MainWindow::onLogoutClicked() {
     
     m_chatListWidget->clear();
     m_contactListWidget->clear();
+    m_groupsListWidget->clear();
+    m_giftsListWidget->clear();
+    m_walletTxListWidget->clear();
     m_chatList->clear();
     m_chatTitle->setText("Select a chat");
+    refreshSidebarIdentity();
     
     m_loginBtn->setEnabled(false);
     m_statusLabel->setText("Resetting connection...");
@@ -926,6 +1130,54 @@ void MainWindow::onClientDebugLog(const QString& message) {
     }
 }
 
+void MainWindow::onSidebarSectionChanged() {
+    const int row = qMax(0, m_sidebarNavList->currentRow());
+    if (row == 6) {
+        onSettingsRequested();
+        m_sidebarNavList->setCurrentRow(0);
+        return;
+    }
+    m_sidebarSections->setCurrentIndex(qMin(row, m_sidebarSections->count() - 1));
+    m_contentStack->setCurrentIndex(qMin(row, m_contentStack->count() - 1));
+    m_headerTitle->setText(m_sidebarNavList->currentItem() ? m_sidebarNavList->currentItem()->text() : "Noveo");
+    if (width() < 980) {
+        m_sidebarDrawer->hide();
+    }
+}
+
+void MainWindow::onRefreshProfile() {
+    fetchAuxiliaryData();
+}
+
+void MainWindow::onOpenProfileFromContact() {
+    if (!m_selectedContactUserId.isEmpty() && m_selectedContactUserId != m_client->currentUserId()) {
+        fetchFirstAvailableJson({ QString("/user/profile?userId=%1").arg(m_selectedContactUserId) }, [this](const QJsonDocument& doc) {
+            if (!doc.isObject()) return;
+            UserProfile viewed = parseProfile(doc.object());
+            m_profileNameLabel->setText(viewed.displayName.isEmpty() ? viewed.username : viewed.displayName);
+            m_profileHandleLabel->setText("@" + viewed.username);
+            m_profileBioLabel->setText(viewed.bio.isEmpty() ? "No bio yet." : viewed.bio);
+            m_profileJoinedLabel->setText(viewed.createdAt > 0 ? ("Joined " + QDateTime::fromMSecsSinceEpoch(viewed.createdAt).toString("yyyy-MM-dd")) : "");
+        });
+    }
+    m_sidebarNavList->setCurrentRow(2);
+    onSidebarSectionChanged();
+}
+
+void MainWindow::onMenuButtonClicked() {
+    m_sidebarDrawer->setVisible(!m_sidebarDrawer->isVisible());
+}
+
+void MainWindow::onSettingsRequested() {
+    if (!m_settingsDialog) return;
+    m_settingsDialog->setDarkMode(m_isDarkMode);
+    m_settingsDialog->setFollowSystem(m_followSystemAppearance);
+    m_settingsDialog->setCompactMode(m_compactDensity);
+    m_settingsDialog->setThemePreset(m_themePreset);
+    m_settingsDialog->setNotificationsEnabled(m_notificationsEnabled);
+    m_settingsDialog->exec();
+}
+
 void MainWindow::onLoginBtnClicked() {
     QString user = m_usernameInput->text().trimmed();
     QString pass = m_passwordInput->text();
@@ -941,6 +1193,14 @@ void MainWindow::onLoginSuccess(const User& user, const QString& token) {
     settings.setValue("username", m_usernameInput->text());
     settings.setValue("password", m_passwordInput->text());
     
+    m_authToken = token;
+    m_users[user.userId] = user;
+    m_profile.userId = user.userId;
+    m_profile.username = user.username;
+    m_profile.displayName = user.displayName.isEmpty() ? user.username : user.displayName;
+    m_profile.avatarUrl = user.avatarUrl;
+    refreshSidebarIdentity();
+    fetchAuxiliaryData();
     m_stackedWidget->setCurrentWidget(m_appPage);
 }
 
@@ -949,23 +1209,27 @@ void MainWindow::onAuthFailed(const QString& msg) {
 }
 
 void MainWindow::onUserListUpdated(const std::vector<User>& users) {
-    m_users.clear();
-    m_contactListWidget->clear();
+    QMap<QString, User> nextUsers;
 
     for (const auto& u : users) {
-        m_users.insert(u.userId, u);
-        if (u.userId == m_client->currentUserId()) continue;
+        nextUsers.insert(u.userId, u);
+    }
+    m_users = nextUsers;
 
-        QListWidgetItem* item = new QListWidgetItem(m_contactListWidget);
-        item->setText(u.username);
-        item->setData(Qt::UserRole, u.userId);
-
-        QString fullUrl = u.avatarUrl;
-        if (!fullUrl.startsWith("http")) {
-            fullUrl = API_BASE_URL + fullUrl;
+    if (m_contacts.isEmpty()) {
+        m_contactListWidget->clear();
+        for (const auto& u : users) {
+            if (u.userId == m_client->currentUserId()) continue;
+            QListWidgetItem* item = new QListWidgetItem(m_contactListWidget);
+            item->setText(resolveUserDisplayName(u));
+            item->setData(Qt::UserRole, u.userId);
+            QString fullUrl = u.avatarUrl;
+            if (!fullUrl.startsWith("http")) fullUrl = API_BASE_URL + fullUrl;
+            item->setData(AvatarUrlRole, fullUrl);
+            item->setIcon(getAvatar(item->text(), fullUrl));
         }
-        item->setData(AvatarUrlRole, fullUrl);
-        item->setIcon(getAvatar(u.username, fullUrl));
+    } else {
+        refreshAuxPanels();
     }
 
     for (int i = 0; i < m_chatListWidget->count(); i++) {
@@ -1092,12 +1356,290 @@ QString MainWindow::resolveChatName(const Chat& chat) {
     if (chat.chatType == "private") {
         for (const auto& memberId : chat.members) {
             if (memberId != m_client->currentUserId()) {
-                if (m_users.contains(memberId)) return m_users[memberId].username;
+                const QString aliased = resolveContactAlias(memberId);
+                if (!aliased.isEmpty()) return aliased;
+                if (m_users.contains(memberId)) return resolveUserDisplayName(m_users[memberId]);
             }
         }
         return "Unknown User";
     }
     return "Chat";
+}
+
+QString MainWindow::resolveUserDisplayName(const User& user) const {
+    if (!user.alias.trimmed().isEmpty()) return user.alias.trimmed();
+    if (!user.displayName.trimmed().isEmpty()) return user.displayName.trimmed();
+    if (!user.username.trimmed().isEmpty()) return user.username.trimmed();
+    return "Unknown";
+}
+
+QString MainWindow::resolveUserDisplayNameById(const QString& userId) const {
+    if (m_contacts.contains(userId)) {
+        const Contact& c = m_contacts[userId];
+        if (!c.alias.trimmed().isEmpty()) return c.alias.trimmed();
+        if (!c.displayName.trimmed().isEmpty()) return c.displayName.trimmed();
+        if (!c.username.trimmed().isEmpty()) return c.username.trimmed();
+    }
+    if (m_users.contains(userId)) return resolveUserDisplayName(m_users[userId]);
+    return QString();
+}
+
+QString MainWindow::resolveChatMemberName(const QString& userId) const {
+    const QString name = resolveUserDisplayNameById(userId);
+    return name.isEmpty() ? QString("Unknown User") : name;
+}
+
+QString MainWindow::resolveContactAlias(const QString& userId) const {
+    if (!m_contacts.contains(userId)) return QString();
+    const Contact& c = m_contacts[userId];
+    if (!c.alias.trimmed().isEmpty()) return c.alias.trimmed();
+    if (!c.displayName.trimmed().isEmpty()) return c.displayName.trimmed();
+    return c.username.trimmed();
+}
+
+QString MainWindow::fieldString(const QJsonObject& obj, const QStringList& keys) const {
+    for (const QString& k : keys) {
+        if (!obj.contains(k)) continue;
+        const QJsonValue v = obj.value(k);
+        if (v.isString()) return v.toString();
+        if (v.isDouble()) return QString::number(v.toDouble());
+    }
+    return {};
+}
+
+QJsonObject MainWindow::fieldObject(const QJsonObject& obj, const QStringList& keys) const {
+    for (const QString& k : keys) if (obj.value(k).isObject()) return obj.value(k).toObject();
+    return {};
+}
+
+QJsonValue MainWindow::fieldValue(const QJsonObject& obj, const QStringList& keys) const {
+    for (const QString& k : keys) if (obj.contains(k)) return obj.value(k);
+    return {};
+}
+
+QList<QJsonObject> MainWindow::extractArrayObjects(const QJsonValue& value) const {
+    QList<QJsonObject> out;
+    if (value.isArray()) {
+        for (const auto& v : value.toArray()) if (v.isObject()) out.push_back(v.toObject());
+    } else if (value.isObject()) {
+        const QJsonObject obj = value.toObject();
+        const QStringList keys = { "data", "items", "results", "contacts", "users", "gifts", "groups", "mutualGroups", "transactions" };
+        for (const QString& k : keys) {
+            if (obj.value(k).isArray()) {
+                for (const auto& v : obj.value(k).toArray()) if (v.isObject()) out.push_back(v.toObject());
+                if (!out.isEmpty()) break;
+            }
+        }
+    }
+    return out;
+}
+
+Contact MainWindow::parseContact(const QJsonObject& obj) const {
+    QJsonObject userObj = obj.value("user").toObject();
+    QJsonObject src = userObj.isEmpty() ? obj : userObj;
+    Contact c;
+    c.userId = fieldString(src, { "userId", "id", "contactUserId" });
+    c.username = fieldString(src, { "username", "login", "handle", "name", "label" });
+    c.displayName = fieldString(obj, { "displayName", "name", "label" });
+    if (c.displayName.isEmpty()) c.displayName = fieldString(src, { "displayName", "name", "label" });
+    c.alias = fieldString(obj, { "alias", "contactName", "saveAs", "displayName" });
+    c.avatarUrl = fieldString(src, { "avatarUrl", "avatar", "photoUrl" });
+    c.isContact = true;
+    return c;
+}
+
+Gift MainWindow::parseGift(const QJsonObject& obj) const {
+    Gift g;
+    g.giftId = fieldString(obj, { "giftId", "id" });
+    g.name = fieldString(obj, { "name", "title", "label" });
+    g.imageUrl = fieldString(obj, { "imageUrl", "photoUrl", "avatarUrl" });
+    g.quantity = fieldString(obj, { "quantity", "count" }).toInt();
+    if (g.quantity <= 0) g.quantity = 1;
+    g.priceLabel = fieldString(obj, { "priceLabel", "price" });
+    return g;
+}
+
+GroupInfo MainWindow::parseGroup(const QJsonObject& obj, bool mutual) const {
+    GroupInfo g;
+    g.groupId = fieldString(obj, { "groupId", "chatId", "id" });
+    g.name = fieldString(obj, { "chatName", "name", "title" });
+    g.memberCount = fieldString(obj, { "memberCount" }).toInt();
+    if (g.memberCount == 0 && obj.value("members").isArray()) g.memberCount = obj.value("members").toArray().size();
+    g.isMutual = mutual;
+    return g;
+}
+
+WalletOverview MainWindow::parseWallet(const QJsonObject& obj) const {
+    WalletOverview w;
+    w.balanceTenths = fieldString(obj, { "balanceTenths", "starsBalance", "balance" }).toDouble();
+    const QList<QJsonObject> txs = extractArrayObjects(fieldValue(obj, { "transactions", "history", "items", "results" }));
+    for (const auto& txObj : txs) {
+        WalletTransaction tx;
+        tx.id = fieldString(txObj, { "transactionId", "id" });
+        tx.description = fieldString(txObj, { "description", "label" });
+        tx.type = fieldString(txObj, { "type", "kind" });
+        tx.amountTenths = fieldString(txObj, { "amountTenths", "amount" }).toDouble();
+        tx.createdAt = static_cast<qint64>(fieldString(txObj, { "createdAt", "timestamp" }).toDouble());
+        w.transactions.push_back(tx);
+    }
+    return w;
+}
+
+UserProfile MainWindow::parseProfile(const QJsonObject& obj) const {
+    UserProfile p;
+    QJsonObject src = obj;
+    if (obj.value("profile").isObject()) src = obj.value("profile").toObject();
+    p.userId = fieldString(src, { "userId", "id" });
+    p.username = fieldString(src, { "username", "name" });
+    p.displayName = fieldString(src, { "displayName", "name", "username" });
+    p.handle = fieldString(src, { "handle", "username" });
+    p.bio = fieldString(src, { "bio", "about", "description" });
+    p.avatarUrl = fieldString(src, { "avatarUrl", "avatar", "photoUrl" });
+    p.createdAt = static_cast<qint64>(fieldString(src, { "createdAt", "joinedAt" }).toDouble());
+    for (const auto& gObj : extractArrayObjects(fieldValue(src, { "gifts", "ownedGifts" }))) p.gifts.push_back(parseGift(gObj));
+    for (const auto& gObj : extractArrayObjects(fieldValue(src, { "groups" }))) p.groups.push_back(parseGroup(gObj, false));
+    for (const auto& gObj : extractArrayObjects(fieldValue(src, { "mutualGroups" }))) p.mutualGroups.push_back(parseGroup(gObj, true));
+    if (src.value("wallet").isObject()) p.wallet = parseWallet(src.value("wallet").toObject());
+    p.wallet.balanceTenths = qMax(p.wallet.balanceTenths, fieldString(src, { "starsBalance", "stars" }).toDouble());
+    return p;
+}
+
+QString MainWindow::normalizedApiUrl(const QString& path) const {
+    if (path.startsWith("http")) return path;
+    return API_BASE_URL + (path.startsWith("/") ? path : "/" + path);
+}
+
+void MainWindow::fetchEndpointChain(const QStringList& endpoints, int index, const std::function<void(const QJsonDocument&)>& onSuccess) {
+    if (index >= endpoints.size()) return;
+    QNetworkRequest req(QUrl(normalizedApiUrl(endpoints[index])));
+    req.setRawHeader("X-User-ID", m_client->currentUserId().toUtf8());
+    req.setRawHeader("X-Auth-Token", m_authToken.toUtf8());
+    req.setRawHeader("Authorization", ("Bearer " + m_authToken).toUtf8());
+    QNetworkReply* reply = m_nam->get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, endpoints, index, onSuccess]() {
+        QByteArray body = reply->readAll();
+        const bool ok = reply->error() == QNetworkReply::NoError;
+        reply->deleteLater();
+        if (ok) {
+            QJsonParseError err;
+            QJsonDocument doc = QJsonDocument::fromJson(body, &err);
+            if (err.error == QJsonParseError::NoError) {
+                onSuccess(doc);
+                refreshAuxPanels();
+                return;
+            }
+        }
+        fetchEndpointChain(endpoints, index + 1, onSuccess);
+    });
+}
+
+void MainWindow::fetchFirstAvailableJson(const QStringList& endpoints, const std::function<void(const QJsonDocument&)>& onSuccess) {
+    fetchEndpointChain(endpoints, 0, onSuccess);
+}
+
+QString MainWindow::formatStars(double tenths) const {
+    return QString::number(tenths / 10.0, 'f', 2);
+}
+
+void MainWindow::refreshSidebarIdentity() {
+    const QString display = !m_profile.displayName.isEmpty() ? m_profile.displayName : m_profile.username;
+    m_sidebarDisplayName->setText(display.isEmpty() ? "Not signed in" : display);
+    m_sidebarHandle->setText(m_profile.username.isEmpty() ? "@" : ("@" + m_profile.username));
+    m_sidebarAvatar->setPixmap(getAvatar(display, m_profile.avatarUrl).pixmap(42, 42));
+}
+
+void MainWindow::refreshAuxPanels() {
+    m_contactListWidget->clear();
+    QListWidget* contactsPageList = m_contactsPage ? m_contactsPage->findChild<QListWidget*>("allContactsPageList") : nullptr;
+    if (contactsPageList) contactsPageList->clear();
+    QList<Contact> contacts = m_contacts.values();
+    std::sort(contacts.begin(), contacts.end(), [](const Contact& a, const Contact& b) {
+        const QString an = !a.alias.isEmpty() ? a.alias : (!a.displayName.isEmpty() ? a.displayName : a.username);
+        const QString bn = !b.alias.isEmpty() ? b.alias : (!b.displayName.isEmpty() ? b.displayName : b.username);
+        return an.localeAwareCompare(bn) < 0;
+    });
+    for (const Contact& c : contacts) {
+        if (c.userId == m_client->currentUserId()) continue;
+        auto* item = new QListWidgetItem(m_contactListWidget);
+        const QString name = !c.alias.isEmpty() ? c.alias : (!c.displayName.isEmpty() ? c.displayName : c.username);
+        item->setText(name);
+        item->setData(Qt::UserRole, c.userId);
+        item->setData(AvatarUrlRole, normalizedApiUrl(c.avatarUrl));
+        item->setIcon(getAvatar(name, c.avatarUrl));
+        if (contactsPageList) {
+            auto* pItem = new QListWidgetItem(*item);
+            contactsPageList->addItem(pItem);
+        }
+    }
+
+    m_profileNameLabel->setText(m_profile.displayName.isEmpty() ? m_profile.username : m_profile.displayName);
+    m_profileHandleLabel->setText("@" + m_profile.username);
+    m_profileBioLabel->setText(m_profile.bio.isEmpty() ? "No bio yet." : m_profile.bio);
+    if (m_profile.createdAt > 0) m_profileJoinedLabel->setText("Joined " + QDateTime::fromMSecsSinceEpoch(m_profile.createdAt).toString("yyyy-MM-dd"));
+
+    m_groupsListWidget->clear();
+    for (const GroupInfo& g : m_profile.groups) {
+        m_groupsListWidget->addItem(QString("%1 • %2 members").arg(g.name).arg(g.memberCount));
+    }
+    for (const GroupInfo& g : m_profile.mutualGroups) {
+        m_groupsListWidget->addItem(QString("[Mutual] %1 • %2 members").arg(g.name).arg(g.memberCount));
+    }
+    if (m_groupsListWidget->count() == 0) m_groupsListWidget->addItem("No groups yet.");
+
+    m_giftsListWidget->clear();
+    for (const Gift& g : m_profile.gifts) m_giftsListWidget->addItem(QString("%1 ×%2").arg(g.name).arg(g.quantity));
+    if (m_giftsListWidget->count() == 0) m_giftsListWidget->addItem("No gifts yet.");
+
+    m_walletBalanceLabel->setText(formatStars(m_profile.wallet.balanceTenths) + " Stars");
+    m_walletSummaryLabel->setText(QString("%1 transactions").arg(m_profile.wallet.transactions.size()));
+    m_walletTxListWidget->clear();
+    for (const WalletTransaction& tx : m_profile.wallet.transactions) {
+        m_walletTxListWidget->addItem(QString("%1 | %2 %3").arg(tx.description, tx.amountTenths >= 0 ? "+" : "", formatStars(std::abs(tx.amountTenths))));
+    }
+    if (m_walletTxListWidget->count() == 0) m_walletTxListWidget->addItem("No transactions yet.");
+    refreshSidebarIdentity();
+}
+
+void MainWindow::fetchAuxiliaryData() {
+    if (m_authToken.isEmpty() || m_client->currentUserId().isEmpty()) return;
+    fetchFirstAvailableJson({ QString("/user/profile?userId=%1").arg(m_client->currentUserId()), "/user/me", "/profile/me" }, [this](const QJsonDocument& doc) {
+        if (doc.isObject()) m_profile = parseProfile(doc.object());
+    });
+    fetchFirstAvailableJson({ "/user/contacts", "/contacts" }, [this](const QJsonDocument& doc) {
+        const QList<QJsonObject> objects = extractArrayObjects(doc.isArray() ? QJsonValue(doc.array()) : QJsonValue(doc.object().value("contacts").isUndefined() ? QJsonValue(doc.object()) : doc.object().value("contacts")));
+        for (const QJsonObject& obj : objects) {
+            Contact c = parseContact(obj);
+            if (!c.userId.isEmpty()) m_contacts[c.userId] = c;
+        }
+    });
+    fetchFirstAvailableJson({ "/stars/overview", "/wallet/overview", "/user/stars" }, [this](const QJsonDocument& doc) {
+        if (!doc.isObject()) return;
+        QJsonObject root = doc.object();
+        if (root.value("wallet").isObject()) m_profile.wallet = parseWallet(root.value("wallet").toObject());
+        else m_profile.wallet = parseWallet(root);
+    });
+    fetchFirstAvailableJson({ QString("/user/groups?userId=%1").arg(m_client->currentUserId()), "/user/groups", "/groups/my" }, [this](const QJsonDocument& doc) {
+        const QList<QJsonObject> objects = extractArrayObjects(doc.isArray() ? QJsonValue(doc.array()) : QJsonValue(doc.object()));
+        if (!objects.isEmpty()) {
+            m_profile.groups.clear();
+            for (const auto& o : objects) m_profile.groups.push_back(parseGroup(o, false));
+        }
+    });
+    fetchFirstAvailableJson({ QString("/user/mutual-groups?userId=%1").arg(m_client->currentUserId()), "/user/mutual-groups", "/groups/mutual" }, [this](const QJsonDocument& doc) {
+        const QList<QJsonObject> objects = extractArrayObjects(doc.isArray() ? QJsonValue(doc.array()) : QJsonValue(doc.object()));
+        if (!objects.isEmpty()) {
+            m_profile.mutualGroups.clear();
+            for (const auto& o : objects) m_profile.mutualGroups.push_back(parseGroup(o, true));
+        }
+    });
+    fetchFirstAvailableJson({ "/gifts/owned", "/gift/my", "/user/gifts" }, [this](const QJsonDocument& doc) {
+        const QList<QJsonObject> objects = extractArrayObjects(doc.isArray() ? QJsonValue(doc.array()) : QJsonValue(doc.object()));
+        if (!objects.isEmpty()) {
+            m_profile.gifts.clear();
+            for (const auto& o : objects) m_profile.gifts.push_back(parseGift(o));
+        }
+    });
+    refreshAuxPanels();
 }
 
 QColor MainWindow::getColorForName(const QString& name) {
@@ -1279,6 +1821,8 @@ void MainWindow::onContactSelected(QListWidgetItem* item) {
         m_chatTitle->setText(item->text());
         m_chatList->clear();
     }
+    m_sidebarNavList->setCurrentRow(0);
+    onSidebarSectionChanged();
 }
 
 void MainWindow::renderMessages(const QString& chatId) {
@@ -1337,12 +1881,9 @@ void MainWindow::addMessageBubble(const Message& msg, bool appendStretch, bool a
     Q_UNUSED(animate);
 
     bool isMe = (msg.senderId == m_client->currentUserId());
-    QString senderName = "Unknown";
+    QString senderName = resolveChatMemberName(msg.senderId);
     QString avatarUrl = "";
-    if (m_users.contains(msg.senderId)) {
-        senderName = m_users[msg.senderId].username;
-        avatarUrl = m_users[msg.senderId].avatarUrl;
-    }
+    if (m_users.contains(msg.senderId)) avatarUrl = m_users[msg.senderId].avatarUrl;
 
     QString displayText = msg.text;
     QString trimmed = displayText.trimmed();
@@ -1409,12 +1950,9 @@ void MainWindow::addMessageBubble(const Message& msg, bool appendStretch, bool a
 
 void MainWindow::prependMessageBubble(const Message& msg) {
     bool isMe = (msg.senderId == m_client->currentUserId());
-    QString senderName = "Unknown";
+    QString senderName = resolveChatMemberName(msg.senderId);
     QString avatarUrl = "";
-    if (m_users.contains(msg.senderId)) {
-        senderName = m_users[msg.senderId].username;
-        avatarUrl = m_users[msg.senderId].avatarUrl;
-    }
+    if (m_users.contains(msg.senderId)) avatarUrl = m_users[msg.senderId].avatarUrl;
 
     QString displayText = msg.text;
     QString trimmed = displayText.trimmed();
@@ -1757,10 +2295,7 @@ void MainWindow::onReplyToMessage() {
     m_replyingToMessageId = messageId;
     m_replyingToText = messageText;
     
-    QString senderName = "Unknown";
-    if (m_users.contains(replyMsg->senderId)) {
-        senderName = m_users[replyMsg->senderId].username;
-    }
+    QString senderName = resolveChatMemberName(replyMsg->senderId);
     m_replyingToSender = senderName;
 
     QString preview = messageText.length() > 50 
@@ -1976,13 +2511,9 @@ void MainWindow::showNotificationForMessage(const Message& msg)
     }
 
     // 1. Resolve Sender Name and Avatar
-    QString senderName = "Unknown";
+    QString senderName = resolveChatMemberName(msg.senderId);
     QString avatarUrl;
-    
-    if (m_users.contains(msg.senderId)) {
-        senderName = m_users[msg.senderId].username;
-        avatarUrl = m_users[msg.senderId].avatarUrl;
-    }
+    if (m_users.contains(msg.senderId)) avatarUrl = m_users[msg.senderId].avatarUrl;
 
     // 2. Resolve Chat Name and Title Format
     QString title;

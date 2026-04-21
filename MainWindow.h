@@ -13,7 +13,6 @@
 #include <QLabel>
 #include <QStackedWidget>
 #include <QTabWidget>
-#include <QCheckBox>
 #include <QMap>
 #include <QSet>
 #include <QNetworkAccessManager>
@@ -22,12 +21,17 @@
 #include <QMenu>
 #include <QAction>
 #include <QCloseEvent>
+#include <QStackedLayout>
+#include <QJsonValue>
+#include <QJsonDocument>
+#include <functional>
 
 #include "WebSocketClient.h"
 #include "DataStructures.h"
 
 class QDialog;
 class QPlainTextEdit;
+class SettingsDialog;
 
 class UserListDelegate : public QStyledItemDelegate {
     Q_OBJECT
@@ -107,10 +111,35 @@ private slots:
     void onTrayQuit();
     void onOpenDeveloperConsole();
     void onClientDebugLog(const QString& message);
+    void onSidebarSectionChanged();
+    void onRefreshProfile();
+    void onOpenProfileFromContact();
+    void onMenuButtonClicked();
+    void onSettingsRequested();
 
 private:
     void setupUi();
     void applyTheme();
+    void refreshSidebarIdentity();
+    void refreshAuxPanels();
+    void fetchAuxiliaryData();
+    void fetchFirstAvailableJson(const QStringList& endpoints, const std::function<void(const QJsonDocument&)>& onSuccess);
+    void fetchEndpointChain(const QStringList& endpoints, int index, const std::function<void(const QJsonDocument&)>& onSuccess);
+    QString normalizedApiUrl(const QString& path) const;
+    QList<QJsonObject> extractArrayObjects(const QJsonValue& value) const;
+    Contact parseContact(const QJsonObject& obj) const;
+    UserProfile parseProfile(const QJsonObject& obj) const;
+    Gift parseGift(const QJsonObject& obj) const;
+    GroupInfo parseGroup(const QJsonObject& obj, bool mutual) const;
+    WalletOverview parseWallet(const QJsonObject& obj) const;
+    QString resolveUserDisplayName(const User& user) const;
+    QString resolveUserDisplayNameById(const QString& userId) const;
+    QString resolveChatMemberName(const QString& userId) const;
+    QString resolveContactAlias(const QString& userId) const;
+    QString fieldString(const QJsonObject& obj, const QStringList& keys) const;
+    QJsonObject fieldObject(const QJsonObject& obj, const QStringList& keys) const;
+    QJsonValue fieldValue(const QJsonObject& obj, const QStringList& keys) const;
+    QString formatStars(double tenths) const;
 
     void renderMessages(const QString& chatId);
     void addMessageBubble(const Message& msg, bool appendStretch, bool animate);
@@ -151,8 +180,45 @@ private:
 
     QListWidget* m_chatListWidget = nullptr;
     QListWidget* m_contactListWidget = nullptr;
-    QTabWidget* m_sidebarTabs = nullptr;
-    QWidget* m_settingsTab = nullptr;
+    QListWidget* m_sidebarNavList = nullptr;
+    QStackedWidget* m_sidebarSections = nullptr;
+    QWidget* m_sidebarDrawer = nullptr;
+    QWidget* m_appHeader = nullptr;
+    QPushButton* m_menuBtn = nullptr;
+    QLabel* m_headerTitle = nullptr;
+    QWidget* m_sidebarIdentityWidget = nullptr;
+    QLabel* m_sidebarAvatar = nullptr;
+    QLabel* m_sidebarDisplayName = nullptr;
+    QLabel* m_sidebarHandle = nullptr;
+    QWidget* m_profilePanel = nullptr;
+    QWidget* m_groupsPanel = nullptr;
+    QWidget* m_giftsPanel = nullptr;
+    QWidget* m_starsPanel = nullptr;
+    QWidget* m_contactsPage = nullptr;
+    QWidget* m_profilePage = nullptr;
+    QWidget* m_groupsPage = nullptr;
+    QWidget* m_giftsPage = nullptr;
+    QWidget* m_starsPage = nullptr;
+    QListWidget* m_groupsListWidget = nullptr;
+    QListWidget* m_giftsListWidget = nullptr;
+    QListWidget* m_walletTxListWidget = nullptr;
+    QLabel* m_profileNameLabel = nullptr;
+    QLabel* m_profileHandleLabel = nullptr;
+    QLabel* m_profileBioLabel = nullptr;
+    QLabel* m_profileJoinedLabel = nullptr;
+    QLabel* m_contactPageTitle = nullptr;
+    QLabel* m_contactPageSubtitle = nullptr;
+    QPushButton* m_contactMessageBtn = nullptr;
+    QPushButton* m_contactProfileBtn = nullptr;
+    QString m_selectedContactUserId;
+    QLabel* m_walletBalanceLabel = nullptr;
+    QLabel* m_walletSummaryLabel = nullptr;
+    QString m_themePreset = "Default";
+    bool m_followSystemAppearance = false;
+    bool m_compactDensity = false;
+    SettingsDialog* m_settingsDialog = nullptr;
+    QStackedWidget* m_contentStack = nullptr;
+    QWidget* m_chatPage = nullptr;
 
     QWidget* m_chatAreaWidget = nullptr;
     QLabel* m_chatTitle = nullptr;
@@ -171,13 +237,13 @@ private:
     QLabel* m_replyLabel = nullptr;
     QPushButton* m_cancelReplyBtn = nullptr;
 
-    // Checkbox for notifications
-    QCheckBox* m_notificationsCheck = nullptr;
-
     // Data
     QMap<QString, User> m_users;
+    QMap<QString, Contact> m_contacts;
     QMap<QString, Chat> m_chats;
     QString m_currentChatId;
+    QString m_authToken;
+    UserProfile m_profile;
 
     bool m_isDarkMode = false;
 

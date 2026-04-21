@@ -14,6 +14,7 @@ set(SOURCES
     MainWindow.cpp
     WebSocketClient.cpp
     MessageBubble.cpp
+    SettingsDialog.cpp
 )
 
 if(WIN32)
@@ -25,6 +26,7 @@ set(HEADERS
     WebSocketClient.h
     DataStructures.h
     MessageBubble.h
+    SettingsDialog.h
 )
 
 # Added WIN32 here to hide the console window
