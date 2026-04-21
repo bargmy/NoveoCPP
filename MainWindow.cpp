@@ -2101,6 +2101,7 @@ void MainWindow::onLogoutClicked() {
     m_reconnectAttempts = 0;
     m_waitingForSessionReconnectResult = false;
     m_hasAuthenticatedSession = false;
+    m_blockAutoSessionReconnect = false;
     if (!m_currentVoiceChatId.isEmpty()) {
         m_client->voiceLeave(m_currentVoiceChatId);
     }
@@ -2201,7 +2202,12 @@ void MainWindow::onLogoutClicked() {
 
 void MainWindow::tryReconnectWithSavedSession()
 {
-    if (m_waitingForSessionReconnectResult) {
+    const bool autoSessionReconnectEnabled = qEnvironmentVariableIntValue("NOVEO_ENABLE_AUTO_SESSION_RECONNECT") == 1;
+    if (!autoSessionReconnectEnabled) {
+        return;
+    }
+
+    if (m_waitingForSessionReconnectResult || m_blockAutoSessionReconnect) {
         return;
     }
 
@@ -2211,6 +2217,7 @@ void MainWindow::tryReconnectWithSavedSession()
     }
 
     m_waitingForSessionReconnectResult = true;
+    m_blockAutoSessionReconnect = true; // one-shot until explicit auth succeeds
     m_statusLabel->setText("Reconnecting session...");
     m_client->reconnectWithToken(session.userId, session.token);
 }
@@ -2224,6 +2231,7 @@ void MainWindow::onDisconnected()
     if (m_waitingForSessionReconnectResult) {
         m_waitingForSessionReconnectResult = false;
         m_hasAuthenticatedSession = false;
+        m_blockAutoSessionReconnect = true;
         SessionStore::clear();
         m_restClient->clearAuthContext();
         m_authToken.clear();
@@ -2356,6 +2364,7 @@ void MainWindow::onLoginBtnClicked() {
     }
 
     m_waitingForSessionReconnectResult = false;
+    m_blockAutoSessionReconnect = false;
     m_statusLabel->setStyleSheet("color: #6b7280;");
     m_statusLabel->setText("Logging in...");
     m_loginBtn->setEnabled(false);
@@ -2385,6 +2394,7 @@ void MainWindow::onRegisterBtnClicked()
     }
 
     m_waitingForSessionReconnectResult = false;
+    m_blockAutoSessionReconnect = false;
     m_statusLabel->setStyleSheet("color: #6b7280;");
     m_statusLabel->setText("Registering...");
     m_loginBtn->setEnabled(false);
@@ -2403,6 +2413,7 @@ void MainWindow::onLoginSuccess(const User& user, const QString& token, qint64 e
     m_reconnectAttempts = 0;
     m_waitingForSessionReconnectResult = false;
     m_hasAuthenticatedSession = true;
+    m_blockAutoSessionReconnect = false;
     if (m_reconnectTimer) {
         m_reconnectTimer->stop();
     }
@@ -2447,6 +2458,7 @@ void MainWindow::onAuthFailed(const QString& msg) {
     m_reconnectAttempts = 0;
     m_waitingForSessionReconnectResult = false;
     m_hasAuthenticatedSession = false;
+    m_blockAutoSessionReconnect = reconnectFailure;
     SessionStore::clear();
     m_restClient->clearAuthContext();
     m_authToken.clear();

@@ -282,6 +282,7 @@ private:
     QTimer* m_reconnectTimer = nullptr;
     bool m_waitingForSessionReconnectResult = false;
     bool m_hasAuthenticatedSession = false;
+    bool m_blockAutoSessionReconnect = false;
 
     bool m_isDarkMode = false;
     bool m_notificationsEnabled = true;
