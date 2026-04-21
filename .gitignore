@@ -3,3 +3,7 @@ build/
 out/
 CMakeUserPresets.json
 /CMakePresets.json
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
