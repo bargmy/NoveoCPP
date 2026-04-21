@@ -168,8 +168,8 @@ jobs:
           cp "$QT_ROOT/plugins/platforms/qwindows.dll" platforms/
 
           echo "Downloading OpenSSL runtime DLLs from GitHub release assets..."
-          curl --fail --silent --show-error --location -o libssl-1_1-x64.dll https://github.com/bargmy/NoveoCPP/releases/download/ssl/libssl-1_1-x64.dll
-          curl --fail --silent --show-error --location -o libcrypto-1_1-x64.dll https://github.com/bargmy/NoveoCPP/releases/download/ssl/libcrypto-1_1-x64.dll
+          curl --ssl-no-revoke --fail --silent --show-error --location -o libssl-1_1-x64.dll https://github.com/bargmy/NoveoCPP/releases/download/ssl/libssl-1_1-x64.dll
+          curl --ssl-no-revoke --fail --silent --show-error --location -o libcrypto-1_1-x64.dll https://github.com/bargmy/NoveoCPP/releases/download/ssl/libcrypto-1_1-x64.dll
 
           ZIP_NAME="NoveoDesktop_${VERSION}_${DATE}_x64_Windows.zip"
           7z a "$ZIP_NAME" * -xr!*.obj -xr!*.cpp -xr!*.h -xr!Makefile -xr!CMakeFiles -xr!*_autogen
@@ -199,7 +199,7 @@ jobs:
             exit 0
           fi
           test -f "$WIN_EXE"
-          curl --fail --silent --show-error \
+          curl --ssl-no-revoke --fail --silent --show-error \
             -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument" \
             -F chat_id="${TG_CHANNEL_ID}" \
             -F document=@"${WIN_EXE}" \
