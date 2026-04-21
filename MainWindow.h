@@ -13,8 +13,6 @@
 #include <QLabel>
 #include <QStackedWidget>
 #include <QTabWidget>
-#include <QComboBox>
-#include <QCheckBox>
 #include <QMap>
 #include <QSet>
 #include <QNetworkAccessManager>
@@ -25,6 +23,7 @@
 #include <QCloseEvent>
 #include <QStackedLayout>
 #include <QJsonValue>
+#include <QJsonDocument>
 #include <functional>
 
 #include "WebSocketClient.h"
@@ -32,6 +31,7 @@
 
 class QDialog;
 class QPlainTextEdit;
+class SettingsDialog;
 
 class UserListDelegate : public QStyledItemDelegate {
     Q_OBJECT
@@ -114,6 +114,8 @@ private slots:
     void onSidebarSectionChanged();
     void onRefreshProfile();
     void onOpenProfileFromContact();
+    void onMenuButtonClicked();
+    void onSettingsRequested();
 
 private:
     void setupUi();
@@ -121,7 +123,8 @@ private:
     void refreshSidebarIdentity();
     void refreshAuxPanels();
     void fetchAuxiliaryData();
-    void apiGetFirstSuccess(const QStringList& endpoints, const std::function<void(const QJsonDocument&)>& onSuccess);
+    void fetchFirstAvailableJson(const QStringList& endpoints, const std::function<void(const QJsonDocument&)>& onSuccess);
+    void fetchEndpointChain(const QStringList& endpoints, int index, const std::function<void(const QJsonDocument&)>& onSuccess);
     QString normalizedApiUrl(const QString& path) const;
     QList<QJsonObject> extractArrayObjects(const QJsonValue& value) const;
     Contact parseContact(const QJsonObject& obj) const;
@@ -179,6 +182,10 @@ private:
     QListWidget* m_contactListWidget = nullptr;
     QListWidget* m_sidebarNavList = nullptr;
     QStackedWidget* m_sidebarSections = nullptr;
+    QWidget* m_sidebarDrawer = nullptr;
+    QWidget* m_appHeader = nullptr;
+    QPushButton* m_menuBtn = nullptr;
+    QLabel* m_headerTitle = nullptr;
     QWidget* m_sidebarIdentityWidget = nullptr;
     QLabel* m_sidebarAvatar = nullptr;
     QLabel* m_sidebarDisplayName = nullptr;
@@ -187,7 +194,11 @@ private:
     QWidget* m_groupsPanel = nullptr;
     QWidget* m_giftsPanel = nullptr;
     QWidget* m_starsPanel = nullptr;
-    QWidget* m_settingsTab = nullptr;
+    QWidget* m_contactsPage = nullptr;
+    QWidget* m_profilePage = nullptr;
+    QWidget* m_groupsPage = nullptr;
+    QWidget* m_giftsPage = nullptr;
+    QWidget* m_starsPage = nullptr;
     QListWidget* m_groupsListWidget = nullptr;
     QListWidget* m_giftsListWidget = nullptr;
     QListWidget* m_walletTxListWidget = nullptr;
@@ -195,11 +206,17 @@ private:
     QLabel* m_profileHandleLabel = nullptr;
     QLabel* m_profileBioLabel = nullptr;
     QLabel* m_profileJoinedLabel = nullptr;
+    QLabel* m_contactPageTitle = nullptr;
+    QLabel* m_contactPageSubtitle = nullptr;
+    QPushButton* m_contactMessageBtn = nullptr;
+    QPushButton* m_contactProfileBtn = nullptr;
+    QString m_selectedContactUserId;
     QLabel* m_walletBalanceLabel = nullptr;
     QLabel* m_walletSummaryLabel = nullptr;
-    QCheckBox* m_themeFollowSystemCheck = nullptr;
-    QCheckBox* m_compactModeCheck = nullptr;
-    QComboBox* m_themePresetCombo = nullptr;
+    QString m_themePreset = "Default";
+    bool m_followSystemAppearance = false;
+    bool m_compactDensity = false;
+    SettingsDialog* m_settingsDialog = nullptr;
     QStackedWidget* m_contentStack = nullptr;
     QWidget* m_chatPage = nullptr;
 
@@ -219,9 +236,6 @@ private:
     QWidget* m_replyBar = nullptr;
     QLabel* m_replyLabel = nullptr;
     QPushButton* m_cancelReplyBtn = nullptr;
-
-    // Checkbox for notifications
-    QCheckBox* m_notificationsCheck = nullptr;
 
     // Data
     QMap<QString, User> m_users;
