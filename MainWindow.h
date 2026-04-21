@@ -16,6 +16,7 @@
 #include <QCheckBox>
 #include <QMap>
 #include <QSet>
+#include <QJsonArray>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QSystemTrayIcon>
@@ -28,6 +29,8 @@
 
 class QDialog;
 class QPlainTextEdit;
+class QTextEdit;
+class QSplitter;
 
 class UserListDelegate : public QStyledItemDelegate {
     Q_OBJECT
@@ -107,6 +110,7 @@ private slots:
     void onTrayQuit();
     void onOpenDeveloperConsole();
     void onClientDebugLog(const QString& message);
+    void onSidebarSectionChanged(int row);
 
 private:
     void setupUi();
@@ -117,7 +121,9 @@ private:
     void prependMessageBubble(const Message& msg);
 
     QString resolveChatName(const Chat& chat);
+    QString resolveUserDisplayName(const QString& userId, const QString& fallback = QString()) const;
     QColor getColorForName(const QString& name);
+    QString normalizeAvatarUrl(const QString& url) const;
 
     // Avatar handling
     QIcon getAvatar(const QString& name, const QString& url);
@@ -130,6 +136,16 @@ private:
 
     void updateMessageStatus(const QString& messageId, MessageStatus newStatus);
     MessageStatus calculateMessageStatus(const Message& msg, const Chat& chat);
+    void updateIdentityHeader();
+    void populateContactList();
+    void refreshProfilePanels();
+    void refreshStarsPanel();
+    void fetchContacts();
+    void fetchMyProfile();
+    void fetchStarsOverview();
+    ContactEntry parseContactEntry(const QJsonObject& obj) const;
+    ProfileData parseProfileData(const QJsonObject& obj) const;
+    static QJsonArray extractArrayFlexible(const QJsonDocument& doc, const QStringList& objectKeys);
 
     // Tray + notifications
     void setupTrayIcon();
@@ -151,8 +167,28 @@ private:
 
     QListWidget* m_chatListWidget = nullptr;
     QListWidget* m_contactListWidget = nullptr;
-    QTabWidget* m_sidebarTabs = nullptr;
+    QWidget* m_sidebarWidget = nullptr;
+    QWidget* m_sidebarHeader = nullptr;
+    QLabel* m_sidebarAvatar = nullptr;
+    QLabel* m_sidebarDisplayName = nullptr;
+    QLabel* m_sidebarHandle = nullptr;
+    QListWidget* m_sidebarNavList = nullptr;
+    QStackedWidget* m_sidebarStack = nullptr;
+    QWidget* m_chatsTab = nullptr;
+    QWidget* m_contactsTab = nullptr;
+    QWidget* m_starsTab = nullptr;
+    QWidget* m_profileTab = nullptr;
     QWidget* m_settingsTab = nullptr;
+    QLabel* m_starsBalanceLabel = nullptr;
+    QTextEdit* m_starsInfo = nullptr;
+    QLabel* m_profileAvatar = nullptr;
+    QLabel* m_profileDisplayName = nullptr;
+    QLabel* m_profileUsername = nullptr;
+    QLabel* m_profileHandle = nullptr;
+    QLabel* m_profileBio = nullptr;
+    QListWidget* m_profileGiftsList = nullptr;
+    QListWidget* m_profileGroupsList = nullptr;
+    QListWidget* m_profileMutualGroupsList = nullptr;
 
     QWidget* m_chatAreaWidget = nullptr;
     QLabel* m_chatTitle = nullptr;
@@ -176,8 +212,12 @@ private:
 
     // Data
     QMap<QString, User> m_users;
+    QMap<QString, ContactEntry> m_contacts;
     QMap<QString, Chat> m_chats;
     QString m_currentChatId;
+    QString m_authToken;
+    User m_currentUser;
+    ProfileData m_myProfile;
 
     bool m_isDarkMode = false;
 
