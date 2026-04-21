@@ -9,9 +9,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  # =========================================================
-  # PREPARE: CALCULATE VERSION & DATE
-  # =========================================================
   prepare:
     runs-on: ubuntu-latest
     outputs:
@@ -102,9 +99,6 @@ jobs:
             echo "new_version=$refname" >> $GITHUB_OUTPUT
           fi
 
-  # =========================================================
-  # WINDOWS BUILD
-  # =========================================================
   build-windows:
     needs: prepare
     runs-on: windows-latest
@@ -173,8 +167,9 @@ jobs:
           mkdir -p platforms
           cp "$QT_ROOT/plugins/platforms/qwindows.dll" platforms/
 
-          curl -L -o libssl-1_1-x64.dll http://hienob.bargmy.ir/openssl/libssl-1_1-x64.dll
-          curl -L -o libcrypto-1_1-x64.dll http://hienob.bargmy.ir/openssl/libcrypto-1_1-x64.dll
+          echo "Downloading OpenSSL runtime DLLs from GitHub release assets..."
+          curl --fail --silent --show-error --location -o libssl-1_1-x64.dll https://github.com/bargmy/NoveoCPP/releases/download/ssl/libssl-1_1-x64.dll
+          curl --fail --silent --show-error --location -o libcrypto-1_1-x64.dll https://github.com/bargmy/NoveoCPP/releases/download/ssl/libcrypto-1_1-x64.dll
 
           ZIP_NAME="NoveoDesktop_${VERSION}_${DATE}_x64_Windows.zip"
           7z a "$ZIP_NAME" * -xr!*.obj -xr!*.cpp -xr!*.h -xr!Makefile -xr!CMakeFiles -xr!*_autogen
@@ -210,9 +205,6 @@ jobs:
             -F document=@"${WIN_EXE}" \
             -F caption="NoveoDesktop ${VERSION} Windows executable"
 
-  # =========================================================
-  # LINUX BUILD
-  # =========================================================
   build-linux:
     needs: prepare
     runs-on: ubuntu-latest
@@ -246,10 +238,8 @@ jobs:
           set -e
 
           export PATH="${Qt5_Dir}/bin:$PATH"
-
           mkdir -p build
           cd build
-
           cmake .. -DCMAKE_BUILD_TYPE=Release
           cmake --build .
 
@@ -276,7 +266,6 @@ jobs:
 
           LINUX_TAR="NoveoDesktop_${VERSION}_${DATE}_x64_Linux.tar.gz"
           tar czf "$LINUX_TAR" AppDir
-
           echo "LINUX_ASSET=build/$LINUX_TAR" >> $GITHUB_ENV
 
       - name: Upload Linux Asset
@@ -287,9 +276,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # =========================================================
-  # MACOS BUILD
-  # =========================================================
   build-macos:
     needs: prepare
     runs-on: macos-latest
@@ -318,21 +304,16 @@ jobs:
           set -e
 
           export PATH="${Qt5_Dir}/bin:$PATH"
-
           mkdir -p build
           cd build
-
           cmake .. -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="${Qt5_Dir}" \
             -DCMAKE_OSX_ARCHITECTURES=x86_64
-
           cmake --build .
 
           APP_NAME="NoveoDesktop.app"
-
           mkdir -p "$APP_NAME/Contents/MacOS"
           mkdir -p "$APP_NAME/Contents/Resources"
-
           cp NoveoDesktop "$APP_NAME/Contents/MacOS/"
 
           if [ -f "../icon.icns" ]; then
