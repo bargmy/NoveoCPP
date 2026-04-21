@@ -163,12 +163,14 @@ jobs:
             echo "WARNING: version.rc not found."
           fi
 
-          # 2. Build
+          # 2. Clean stale in-source CMake artifacts and build out-of-source
           export PATH="$MINGW_BIN:$QT_ROOT/bin:$PATH"
-          mkdir -p build
+          rm -rf build
+          rm -rf CMakeFiles
+          rm -f CMakeCache.txt cmake_install.cmake Makefile
+          cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
           cd build
-          cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
-          cmake --build .
 
           # 3. MANUAL DEPLOYMENT
           echo "Executing manual DLL deployment..."
@@ -193,6 +195,7 @@ jobs:
           7z a "$ZIP_NAME" * -xr!*.obj -xr!*.cpp -xr!*.h -xr!Makefile -xr!CMakeFiles -xr!*_autogen
 
           echo "WIN_ASSET=build/$ZIP_NAME" >> $GITHUB_ENV
+          echo "WIN_EXE=build/NoveoDesktop.exe" >> $GITHUB_ENV
 
       - name: Upload Windows Asset
         uses: softprops/action-gh-release@v1
@@ -201,6 +204,22 @@ jobs:
           files: ${{ env.WIN_ASSET }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Windows EXE to Telegram
+        if: ${{ secrets.BOT_TOKEN != '' && secrets.TG_CHANNEL_ID != '' }}
+        shell: bash
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          TG_CHANNEL_ID: ${{ secrets.TG_CHANNEL_ID }}
+          VERSION: ${{ needs.prepare.outputs.new_version }}
+        run: |
+          set -e
+          test -f "$WIN_EXE"
+          curl --fail --silent --show-error \
+            -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument" \
+            -F chat_id="${TG_CHANNEL_ID}" \
+            -F document=@"${WIN_EXE}" \
+            -F caption="NoveoDesktop ${VERSION} Windows executable"
 
   # =========================================================
   # LINUX BUILD (uses icon.png 512x512 from repo root)
