@@ -6,6 +6,7 @@
 #include <QSslSocket>
 #include <QAbstractSocket>
 #include <QNetworkProxy>
+#include <QNetworkRequest>
 
 WebSocketClient::WebSocketClient(QObject* parent) : QObject(parent)
 {
@@ -69,6 +70,7 @@ QString WebSocketClient::socketErrorToString(QAbstractSocket::SocketError error)
 
 void WebSocketClient::connectToServer() {
     const QUrl url(QStringLiteral("wss://noveo.ir:8443/ws"));
+    const QByteArray originHeader("http://localhost");
     emit debugLog(QString("connectToServer() called | currentState=%1 | target=%2")
                       .arg(socketStateToString(m_webSocket.state()))
                       .arg(url.toString()));
@@ -105,8 +107,12 @@ void WebSocketClient::connectToServer() {
         m_webSocket.abort();
     }
 
-    emit debugLog(QString("Opening websocket now | url=%1").arg(url.toString()));
-    m_webSocket.open(url);
+    QNetworkRequest request(url);
+    request.setRawHeader("Origin", originHeader);
+    emit debugLog(QString("Opening websocket now | url=%1 | origin=%2")
+                      .arg(url.toString())
+                      .arg(QString::fromUtf8(originHeader)));
+    m_webSocket.open(request);
 }
 
 void WebSocketClient::onStateChanged(QAbstractSocket::SocketState state) {
