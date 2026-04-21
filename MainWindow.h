@@ -26,6 +26,9 @@
 #include "WebSocketClient.h"
 #include "DataStructures.h"
 
+class QDialog;
+class QPlainTextEdit;
+
 class UserListDelegate : public QStyledItemDelegate {
     Q_OBJECT
 public:
@@ -58,6 +61,7 @@ protected:
 
 private slots:
     void onConnected();
+    void onDisconnected();
     void onLoginBtnClicked();
     void onLoginSuccess(const User& user, const QString& token);
     void onAuthFailed(const QString& msg);
@@ -101,6 +105,8 @@ private slots:
     void onTrayIconActivated(QSystemTrayIcon::ActivationReason reason);
     void onTrayShowHide();
     void onTrayQuit();
+    void onOpenDeveloperConsole();
+    void onClientDebugLog(const QString& message);
 
 private:
     void setupUi();
@@ -204,6 +210,11 @@ private:
     QMenu* m_trayMenu = nullptr;
     QAction* m_trayShowHideAction = nullptr;
     QAction* m_trayQuitAction = nullptr;
+
+    // Developer console
+    QDialog* m_devConsoleDialog = nullptr;
+    QPlainTextEdit* m_devConsoleOutput = nullptr;
+    QStringList m_devConsoleBuffer;
 };
 
 #endif // MAINWINDOW_H

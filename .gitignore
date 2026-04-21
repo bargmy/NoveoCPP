@@ -3,3 +3,4 @@ build/
 out/
 CMakeUserPresets.json
 /CMakePresets.json
+build_1.4.0.0.zip

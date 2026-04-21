@@ -3,8 +3,8 @@
 IDI_ICON1 ICON "icon.ico"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION     1,1,5,0
-PRODUCTVERSION  1,1,5,0
+FILEVERSION     1,4,0,0
+PRODUCTVERSION  1,4,0,0
 FILEFLAGSMASK   0x3fL
 #ifdef _DEBUG
 FILEFLAGS       VS_FF_DEBUG
@@ -21,12 +21,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "HienoB"
             VALUE "FileDescription",  "Noveo Desktop Messenger"
-            VALUE "FileVersion",      "1.1.5.0"
+            VALUE "FileVersion",      "1.4.0.0"
             VALUE "InternalName",     "NoveoCPP"
             VALUE "LegalCopyright",   "Copyright (C) 2025"
             VALUE "OriginalFilename", "NoveoDesktop.exe"
             VALUE "ProductName",      "Noveo Desktop"
-            VALUE "ProductVersion",   "1.1.5.0"
+            VALUE "ProductVersion",   "1.4.0.0"
         END
     END
     BLOCK "VarFileInfo"

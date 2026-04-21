@@ -1,378 +1,268 @@
-name: Build Desktop Release (Win/Lin/Mac)
+name: Build Windows Release (Qt5/MSVC)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, work, codex/task-title ]
+    tags:
+      - 'v*'
 
 permissions:
   contents: write
 
-on:
-  release:
-    types: [published]
-  workflow_dispatch:
-
 jobs:
-  # =========================================================
-  # PREPARE: CALCULATE VERSION & DATE
-  # =========================================================
-  prepare:
-    runs-on: ubuntu-latest
-    outputs:
-      new_version: ${{ steps.setver.outputs.new_version }}
-      build_date: ${{ steps.date.outputs.date }}
+  build-windows-msvc:
+    runs-on: windows-2022
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup MSVC developer command prompt
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          fetch-depth: 0
+          python-version: '3.12'
 
-      - name: Get Date
-        id: date
-        run: echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+      - name: Install build tools
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip aqtinstall
+          choco install ninja -y
 
-      - name: Determine or bump tag
-        id: setver
+      - name: Install Qt 5.15.2 (MSVC)
+        shell: pwsh
+        run: |
+          aqt install-qt -O C:\Qt windows desktop 5.15.2 win64_msvc2019_64
+
+      - name: Validate backend endpoints
+        shell: pwsh
+        run: |
+          if (Select-String -Path "MainWindow.cpp","WebSocketClient.cpp" -Pattern "pcpapc172" -SimpleMatch -Quiet) {
+            throw "Found deprecated backend domain 'pcpapc172' in source files"
+          }
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="C:/Qt/5.15.2/msvc2019_64"
+
+      - name: Build
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --parallel
+
+      - name: Deploy Qt runtime (DLLs/plugins/resources)
+        shell: pwsh
         env:
-          REPO: ${{ github.repository }}
-          REPO_PAT: ${{ secrets.REPO_PAT }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -e
+          $ErrorActionPreference = "Stop"
+          $version = "1.4.0.0"
+          $distRoot = "dist/build_$version"
+          $distBin = "$distRoot"
+          New-Item -ItemType Directory -Force -Path $distBin | Out-Null
+          Add-Content -Path $env:GITHUB_ENV -Value "BUILD_VERSION=$version"
 
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            # Find latest v*-style tag (vMAJOR.MINOR.PATCH.BUILD)
-            latest=$(git tag -l "v*" --sort=-v:refname | head -n 1)
+          $exeCandidates = @(
+            "build/NoveoDesktop.exe",
+            "build/Release/NoveoDesktop.exe"
+          )
+          $exePath = $exeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $exePath) {
+            throw "NoveoDesktop.exe not found. Checked: $($exeCandidates -join ', ')"
+          }
 
-            if [ -z "$latest" ]; then
-              # First tag ever
-              new="v1.0.0.0"
-            else
-              base=${latest#v}
+          Copy-Item $exePath "$distBin/NoveoDesktop.exe" -Force
+          if (Test-Path "web_assets") {
+            Copy-Item "web_assets" "$distRoot/web_assets" -Recurse -Force
+          }
 
-              # Parse up to 4 numeric components; default BUILD to 0 if missing
-              IFS='.' read -r MAJOR MINOR PATCH BUILD <<< "$base"
-              : "${BUILD:=0}"
+          & "C:/Qt/5.15.2/msvc2019_64/bin/windeployqt.exe" --release --compiler-runtime "$distBin/NoveoDesktop.exe"
 
-              echo "Latest tag: $latest -> ${MAJOR}.${MINOR}.${PATCH}.${BUILD}"
+          $repo = "bargmy/NoveoCPP"
+          $tag = "ssl"
+          $headers = @{
+            Authorization = "Bearer $env:GITHUB_TOKEN"
+            Accept = "application/vnd.github+json"
+            "X-GitHub-Api-Version" = "2022-11-28"
+          }
+          $release = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$repo/releases/tags/$tag"
+          $sslAsset = $release.assets | Where-Object { $_.name -eq 'libssl-1_1-x64.dll' } | Select-Object -First 1
+          $cryptoAsset = $release.assets | Where-Object { $_.name -eq 'libcrypto-1_1-x64.dll' } | Select-Object -First 1
 
-              # Detect code changes since last tag, ignoring non-code files
-              # (CMakeLists.txt, version.rc, README.md, icon.png, icon.ico, workflows)
-              changed_files=$(git diff --name-only "$latest"..HEAD | \
-                grep -vE '^(CMakeLists\.txt|version\.rc|README\.md|icon\.png|icon\.ico|\.github/workflows/.*)$' || true)
+          if (-not $sslAsset -or -not $cryptoAsset) {
+            Write-Host "Assets found in release '$tag':"
+            $release.assets | Select-Object name, browser_download_url | Format-Table -AutoSize
+            throw "Required OpenSSL assets were not found in release '$tag'"
+          }
 
-              if [ -n "$changed_files" ]; then
-                echo "Code changes detected (excluding ignored files):"
-                echo "$changed_files"
-                CODE_CHANGED=1
-              else
-                echo "No code changes detected (only ignored files changed or no changes)."
-                CODE_CHANGED=0
-              fi
+          Invoke-WebRequest -Headers $headers -Uri $sslAsset.url -OutFile "$distBin/libssl-1_1-x64.dll"
+          Invoke-WebRequest -Headers $headers -Uri $cryptoAsset.url -OutFile "$distBin/libcrypto-1_1-x64.dll"
+          Write-Host "Bundled OpenSSL DLLs from release '$tag':"
+          Get-Item "$distBin/libssl-1_1-x64.dll", "$distBin/libcrypto-1_1-x64.dll" | Select-Object FullName, Length | Format-Table -AutoSize
 
-              if [ "$CODE_CHANGED" -eq 1 ]; then
-                # Code changed: bump PATCH, reset BUILD to 0 (e.g. 1.2.0.3 -> 1.2.1.0)
-                PATCH=$((PATCH + 1))
-                BUILD=0
+          Write-Host "Files matched for removal before packaging:"
+          $filesToRemove = Get-ChildItem -Path $distRoot -Recurse -File | Where-Object {
+            $_.Name -like 'vcredist*.exe' -or $_.Name -like 'vc_redist*.exe' -or $_.Name -eq 'opengl32.dll' -or $_.Name -eq 'opengl32sw.dll'
+          }
+          $filesToRemove | Select-Object FullName, Length | Format-Table -AutoSize
 
-                # Same rollover rules as before: PATCH>15 → MINOR+1, PATCH=0; MINOR>99 → MAJOR+1, MINOR=0
-                if [ "$PATCH" -gt 15 ]; then
-                  PATCH=0
-                  MINOR=$((MINOR + 1))
-                fi
+          if ($filesToRemove) {
+            $filesToRemove | Remove-Item -Force
+          }
 
-                if [ "$MINOR" -gt 99 ]; then
-                  MINOR=0
-                  MAJOR=$((MAJOR + 1))
-                fi
-              else
-                # No code changes: keep PATCH, bump BUILD (e.g. 1.2.0.3 -> 1.2.0.4)
-                BUILD=$((BUILD + 1))
-              fi
+          $remainingForbidden = Get-ChildItem -Path $distRoot -Recurse -File | Where-Object {
+            $_.Name -like 'vcredist*.exe' -or $_.Name -like 'vc_redist*.exe' -or $_.Name -eq 'opengl32.dll' -or $_.Name -eq 'opengl32sw.dll'
+          }
 
-              new="v${MAJOR}.${MINOR}.${PATCH}.${BUILD}"
-            fi
+          if ($remainingForbidden) {
+            Write-Host "Forbidden files still present after cleanup:"
+            $remainingForbidden | Select-Object FullName, Length | Format-Table -AutoSize
+            throw "Packaging cleanup failed"
+          }
 
-            echo "Manual dispatch -> new tag: $new"
-
-            if [ -n "$REPO_PAT" ]; then
-              AUTH_TOKEN="$REPO_PAT"
-            else
-              AUTH_TOKEN="$GITHUB_TOKEN"
-            fi
-
-            git config user.name "github-actions"
-            git config user.email "github-actions@github.com"
-            git remote set-url origin https://${AUTH_TOKEN}@github.com/${REPO}.git
-            git tag "$new"
-            git push origin "$new"
-
-            echo "new_version=$new" >> $GITHUB_OUTPUT
-          else
-            # Release event: just use the tag that triggered the workflow
-            refname=${GITHUB_REF##*/}
-            echo "Release event -> using tag: $refname"
-            echo "new_version=$refname" >> $GITHUB_OUTPUT
-          fi
-
-  # =========================================================
-  # WINDOWS BUILD (Manual Copy, uses 4-part version)
-  # =========================================================
-  build-windows:
-    needs: prepare
-    runs-on: windows-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ needs.prepare.outputs.new_version }}
-
-      - name: Install Qt
-        uses: jurplel/install-qt-action@v3
-        with:
-          version: '5.15.2'
-          host: 'windows'
-          target: 'desktop'
-          arch: 'win64_mingw81'
-          install-deps: 'true'
-          tools: 'tools_mingw,qt.tools.win64_mingw810'
-
-      - name: Build and Package
-        shell: bash
-        env:
-          QT_ROOT: ${{ env.Qt5_Dir }}
-          MINGW_BIN: ${{ env.IQTA_TOOLS }}/mingw810_64/bin
-          VERSION: ${{ needs.prepare.outputs.new_version }}
-          DATE: ${{ needs.prepare.outputs.build_date }}
-        run: |
-          set -e
-
-          # 1. Update version.rc from tag (vMAJOR.MINOR.PATCH.BUILD)
-          VER_NO_V=${VERSION#v}
-          IFS='.' read -r MAJOR MINOR PATCH BUILD <<< "$VER_NO_V"
-          RC_NUM="${MAJOR},${MINOR},${PATCH},${BUILD}"
-          RC_STR="${MAJOR}.${MINOR}.${PATCH}.${BUILD}"
-          RC_FILE="version.rc"
-
-          if [ -f "$RC_FILE" ]; then
-            echo "Updating version.rc to $RC_STR..."
-            sed -i -E "s/FILEVERSION[ \t]+[0-9,]+/FILEVERSION ${RC_NUM}/" "$RC_FILE"
-            sed -i -E "s/PRODUCTVERSION[ \t]+[0-9,]+/PRODUCTVERSION ${RC_NUM}/" "$RC_FILE"
-            sed -i -E "s/(\"FileVersion\",[ \t]*\")[0-9.]+(\".*)/\1${RC_STR}\2/" "$RC_FILE"
-            sed -i -E "s/(\"ProductVersion\",[ \t]*\")[0-9.]+(\".*)/\1${RC_STR}\2/" "$RC_FILE"
-          else
-            echo "WARNING: version.rc not found."
-          fi
-
-          # 2. Build
-          export PATH="$MINGW_BIN:$QT_ROOT/bin:$PATH"
-          mkdir -p build
-          cd build
-          cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
-          cmake --build .
-
-          # 3. MANUAL DEPLOYMENT
-          echo "Executing manual DLL deployment..."
-          cp "$QT_ROOT/bin/Qt5Core.dll" .
-          cp "$QT_ROOT/bin/Qt5Gui.dll" .
-          cp "$QT_ROOT/bin/Qt5Widgets.dll" .
-          cp "$QT_ROOT/bin/Qt5Network.dll" .
-          cp "$QT_ROOT/bin/Qt5WebSockets.dll" .
-          cp "$MINGW_BIN/libgcc_s_seh-1.dll" .
-          cp "$MINGW_BIN/libstdc++-6.dll" .
-          cp "$MINGW_BIN/libwinpthread-1.dll" .
-
-          mkdir -p platforms
-          cp "$QT_ROOT/plugins/platforms/qwindows.dll" platforms/
-
-          # 4. Download OpenSSL
-          curl -L -o libssl-1_1-x64.dll http://hienob.bargmy.ir/openssl/libssl-1_1-x64.dll
-          curl -L -o libcrypto-1_1-x64.dll http://hienob.bargmy.ir/openssl/libcrypto-1_1-x64.dll
-
-          # 5. Zip
-          ZIP_NAME="NoveoDesktop_${VERSION}_${DATE}_x64_Windows.zip"
-          7z a "$ZIP_NAME" * -xr!*.obj -xr!*.cpp -xr!*.h -xr!Makefile -xr!CMakeFiles -xr!*_autogen
-
-          echo "WIN_ASSET=build/$ZIP_NAME" >> $GITHUB_ENV
-
-      - name: Upload Windows Asset
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ needs.prepare.outputs.new_version }}
-          files: ${{ env.WIN_ASSET }}
+      - name: Package zip and diff zip
+        shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # =========================================================
-  # LINUX BUILD (uses icon.png 512x512 from repo root)
-  # =========================================================
-  build-linux:
-    needs: prepare
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ needs.prepare.outputs.new_version }}
-
-      - name: Install Qt
-        uses: jurplel/install-qt-action@v3
-        with:
-          version: '5.15.2'
-          host: 'linux'
-          target: 'desktop'
-          arch: 'gcc_64'
-          install-deps: 'true'
-
-      - name: Install Deps
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential libgl1-mesa-dev cmake wget file
+          $ErrorActionPreference = "Stop"
+          $version = "$env:BUILD_VERSION"
+          $zipName = "build_$version.zip"
+          $diffZipName = "build_${version}_diff.zip"
+          $distRoot = "dist/build_$version"
+          $diffRoot = "dist/build_${version}_diff"
+          $baselineZip = "baseline_build_$version.zip"
+          $baselineDir = "baseline_build_$version"
 
-      - name: Build and Bundle
+          if (Test-Path $zipName) { Remove-Item $zipName -Force }
+          if (Test-Path $diffZipName) { Remove-Item $diffZipName -Force }
+          if (Test-Path $diffRoot) { Remove-Item $diffRoot -Recurse -Force }
+          if (Test-Path $baselineZip) { Remove-Item $baselineZip -Force }
+          if (Test-Path $baselineDir) { Remove-Item $baselineDir -Recurse -Force }
+
+          Compress-Archive -Path "$distRoot/*" -DestinationPath $zipName -CompressionLevel Optimal
+          Get-Item $zipName | Select-Object FullName, Length | Format-Table -AutoSize
+
+          $headers = @{
+            Authorization = "Bearer $env:GITHUB_TOKEN"
+            Accept = "application/vnd.github+json"
+            "X-GitHub-Api-Version" = "2022-11-28"
+          }
+          $releases = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/bargmy/NoveoCPP/releases"
+          $baselineRelease = $releases | Where-Object {
+            $_.tag_name -ne 'ssl' -and $_.draft -eq $false -and $_.prerelease -eq $false
+          } | Sort-Object {[datetime]$_.published_at} -Descending | Select-Object -First 1
+
+          $baselineAsset = $null
+          if ($baselineRelease) {
+            $baselineAsset = $baselineRelease.assets | Where-Object { $_.name -eq $zipName } | Select-Object -First 1
+          }
+
+          New-Item -ItemType Directory -Force -Path $diffRoot | Out-Null
+          $currentRootResolved = (Resolve-Path $distRoot).Path
+
+          if ($baselineAsset) {
+            Write-Host "Using baseline release $($baselineRelease.tag_name) asset $($baselineAsset.name)"
+            Invoke-WebRequest -Uri $baselineAsset.browser_download_url -OutFile $baselineZip
+            Expand-Archive -Path $baselineZip -DestinationPath $baselineDir -Force
+            $baselineRootResolved = (Resolve-Path $baselineDir).Path
+
+            $changedCount = 0
+            Get-ChildItem -Path $distRoot -Recurse -File | ForEach-Object {
+              $currentFile = $_
+              $relative = $currentFile.FullName.Substring($currentRootResolved.Length).TrimStart('\','/')
+              $baselineFile = Join-Path $baselineRootResolved $relative
+              $copyFile = $false
+
+              if (-not (Test-Path $baselineFile)) {
+                $copyFile = $true
+              } else {
+                $currentHash = (Get-FileHash -Path $currentFile.FullName -Algorithm SHA256).Hash
+                $baselineHash = (Get-FileHash -Path $baselineFile -Algorithm SHA256).Hash
+                if ($currentHash -ne $baselineHash) {
+                  $copyFile = $true
+                }
+              }
+
+              if ($copyFile) {
+                $targetPath = Join-Path $diffRoot $relative
+                $targetDir = Split-Path -Path $targetPath -Parent
+                if (-not (Test-Path $targetDir)) {
+                  New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+                }
+                Copy-Item $currentFile.FullName $targetPath -Force
+                $changedCount += 1
+                Write-Host "Diff includes: $relative"
+              }
+            }
+          } else {
+            Write-Host "No baseline release asset found for $zipName; creating executable-only diff package"
+            Copy-Item "$distRoot/NoveoDesktop.exe" "$diffRoot/NoveoDesktop.exe" -Force
+            $changedCount = 1
+            Write-Host "Diff includes: NoveoDesktop.exe"
+          }
+
+          $diffFiles = Get-ChildItem -Path $diffRoot -Recurse -File -ErrorAction SilentlyContinue
+          if ($diffFiles) {
+            Compress-Archive -Path "$diffRoot/*" -DestinationPath $diffZipName -CompressionLevel Optimal
+            Get-Item $diffZipName | Select-Object FullName, Length | Format-Table -AutoSize
+            Add-Content -Path $env:GITHUB_ENV -Value "DIFF_ZIP_EXISTS=true"
+            Add-Content -Path $env:GITHUB_ENV -Value "DIFF_ZIP_NAME=$diffZipName"
+          } else {
+            Write-Host "No changed files detected; diff zip will be skipped"
+            Add-Content -Path $env:GITHUB_ENV -Value "DIFF_ZIP_EXISTS=false"
+            Add-Content -Path $env:GITHUB_ENV -Value "DIFF_ZIP_NAME=$diffZipName"
+          }
+
+      - name: Upload full artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build_1.4.0.0_windows
+          path: build_1.4.0.0.zip
+
+      - name: Upload diff artifact
+        if: env.DIFF_ZIP_EXISTS == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: build_1.4.0.0_windows_diff
+          path: ${{ env.DIFF_ZIP_NAME }}
+
+      - name: Publish release assets on tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build_1.4.0.0.zip
+            ${{ env.DIFF_ZIP_NAME }}
+          fail_on_unmatched_files: false
+
+      - name: Upload release zip to Telegram
+        shell: pwsh
         env:
-          VERSION: ${{ needs.prepare.outputs.new_version }}
-          DATE: ${{ needs.prepare.outputs.build_date }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          TG_CHANNEL_ID: ${{ secrets.TG_CHANNEL_ID }}
         run: |
-          set -e
+          $ErrorActionPreference = "Stop"
+          $caption = "NoveoCPP release ${{ github.ref_name }}"
+          curl.exe -sS -X POST "https://api.telegram.org/bot$env:BOT_TOKEN/sendDocument" `
+            -F "chat_id=$env:TG_CHANNEL_ID" `
+            -F "caption=$caption" `
+            -F "document=@build_1.4.0.0.zip"
 
-          export PATH="${Qt5_Dir}/bin:$PATH"
-
-          mkdir -p build
-          cd build
-
-          cmake .. -DCMAKE_BUILD_TYPE=Release
-          cmake --build .
-
-          # Prepare AppDir
-          mkdir -p AppDir/usr/bin
-          mkdir -p AppDir/usr/share/applications
-          mkdir -p AppDir/usr/share/icons/hicolor/512x512/apps/
-          cp NoveoDesktop AppDir/usr/bin/
-
-          # Icon: ONLY use icon.png from repo root (expected 512x512)
-          if [ -f "../icon.png" ]; then
-            echo "Using icon.png from repo root..."
-            cp "../icon.png" AppDir/usr/share/icons/hicolor/512x512/apps/noveodesktop.png
-          else
-            echo "WARNING: icon.png not found in repo root, continuing without custom icon."
-          fi
-
-          # Desktop file with Icon name matching noveodesktop.png (without extension)
-          cat > AppDir/usr/share/applications/NoveoDesktop.desktop << 'EOF'
-          [Desktop Entry]
-          Type=Application
-          Name=NoveoDesktop
-          Exec=NoveoDesktop
-          Icon=noveodesktop
-          Categories=Utility;
-          EOF
-
-          # Package AppDir as tar.gz
-          LINUX_TAR="NoveoDesktop_${VERSION}_${DATE}_x64_Linux.tar.gz"
-          tar czf "$LINUX_TAR" AppDir
-
-          echo "LINUX_ASSET=build/$LINUX_TAR" >> $GITHUB_ENV
-
-      - name: Upload Linux Asset
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ needs.prepare.outputs.new_version }}
-          files: ${{ env.LINUX_ASSET }}
+      - name: Upload diff zip to Telegram
+        if: env.DIFF_ZIP_EXISTS == 'true'
+        shell: pwsh
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # =========================================================
-  # MACOS BUILD
-  # =========================================================
-  build-macos:
-    needs: prepare
-    runs-on: macos-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ needs.prepare.outputs.new_version }}
-
-      - name: Install Qt
-        uses: jurplel/install-qt-action@v3
-        with:
-          version: '5.15.2'
-          host: 'mac'
-          target: 'desktop'
-          arch: 'clang_64'
-          install-deps: 'true'
-
-      - name: Build and Bundle
-        env:
-          VERSION: ${{ needs.prepare.outputs.new_version }}
-          DATE: ${{ needs.prepare.outputs.build_date }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          TG_CHANNEL_ID: ${{ secrets.TG_CHANNEL_ID }}
         run: |
-          set -e
-
-          export PATH="${Qt5_Dir}/bin:$PATH"
-
-          mkdir -p build
-          cd build
-
-          cmake .. -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="${Qt5_Dir}" \
-            -DCMAKE_OSX_ARCHITECTURES=x86_64
-
-          cmake --build .
-
-          APP_NAME="NoveoDesktop.app"
-
-          mkdir -p "$APP_NAME/Contents/MacOS"
-          mkdir -p "$APP_NAME/Contents/Resources"
-
-          cp NoveoDesktop "$APP_NAME/Contents/MacOS/"
-
-          if [ -f "../icon.icns" ]; then
-            cp "../icon.icns" "$APP_NAME/Contents/Resources/"
-          fi
-
-          cat > "$APP_NAME/Contents/Info.plist" << 'EOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>CFBundleExecutable</key>
-            <string>NoveoDesktop</string>
-            <key>CFBundleIdentifier</key>
-            <string>com.hienob.noveodesktop</string>
-            <key>CFBundleName</key>
-            <string>NoveoDesktop</string>
-            <key>CFBundlePackageType</key>
-            <string>APPL</string>
-            <key>CFBundleIconFile</key>
-            <string>icon.icns</string>
-          </dict>
-          </plist>
-          EOF
-
-          macdeployqt "$APP_NAME" -dmg -verbose=1
-
-          DMG_FILE=$(ls *.dmg 2>/dev/null | head -n 1 || true)
-          if [ -n "$DMG_FILE" ]; then
-            NEW_DMG="NoveoDesktop_${VERSION}_${DATE}_x64_MacOS.dmg"
-            mv "$DMG_FILE" "$NEW_DMG"
-            FINAL_ASSET="$NEW_DMG"
-          else
-            ZIP_NAME="NoveoDesktop_${VERSION}_${DATE}_x64_MacOS.zip"
-            zip -r "$ZIP_NAME" "$APP_NAME"
-            FINAL_ASSET="$ZIP_NAME"
-          fi
-
-          echo "MAC_ASSET=build/$FINAL_ASSET" >> $GITHUB_ENV
-
-      - name: Upload MacOS Asset
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ needs.prepare.outputs.new_version }}
-          files: ${{ env.MAC_ASSET }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          $ErrorActionPreference = "Stop"
+          $caption = "NoveoCPP diff ${{ github.ref_name }}"
+          curl.exe -sS -X POST "https://api.telegram.org/bot$env:BOT_TOKEN/sendDocument" `
+            -F "chat_id=$env:TG_CHANNEL_ID" `
+            -F "caption=$caption" `
+            -F "document=@${env:DIFF_ZIP_NAME}"
