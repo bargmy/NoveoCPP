@@ -22,6 +22,7 @@
 #include <QMenu>
 #include <QAction>
 #include <QCloseEvent>
+#include <QStringList>
 
 #include "WebSocketClient.h"
 #include "DataStructures.h"
@@ -40,16 +41,21 @@ public:
                    const QModelIndex& index) const override;
 };
 
+struct ContactEntry {
+    QString userId;
+    QString username;
+    QString displayName;
+    QString avatarUrl;
+    bool isMutual = false;
+};
+
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow();
 
-    // Helper to get clean reply preview text (public for MessageDelegate)
     QString getReplyPreviewText(const QString& replyToId, const QString& chatId);
-
-    // Focus helper
     void focusOnMessage(const QString& messageId);
 
 protected:
@@ -75,11 +81,8 @@ private slots:
 
     void onDarkModeToggled(bool checked);
     void onLogoutClicked();
-
-    // Notifications setting
     void onNotificationsToggled(bool checked);
 
-    // Context menu slots
     void onChatListContextMenu(const QPoint& pos);
     void onEditMessage();
     void onDeleteMessage();
@@ -91,13 +94,9 @@ private slots:
     void onMessageUpdated(const QString& chatId, const QString& messageId, const QString& newContent, qint64 editedAt);
     void onMessageDeleted(const QString& chatId, const QString& messageId);
 
-    // Scroll detection
     void onScrollValueChanged(int value);
-
-    // Click on replied message => focus original
     void onChatListItemClicked(const QModelIndex& index);
 
-    // Tray handlers
     void onTrayIconActivated(QSystemTrayIcon::ActivationReason reason);
     void onTrayShowHide();
     void onTrayQuit();
@@ -111,9 +110,10 @@ private:
     void prependMessageBubble(const Message& msg);
 
     QString resolveChatName(const Chat& chat);
+    QString displayNameForUserId(const QString& userId) const;
+    QString normalizeAvatarUrl(const QString& url) const;
     QColor getColorForName(const QString& name);
 
-    // Avatar handling
     QIcon getAvatar(const QString& name, const QString& url);
     QIcon generateGenericAvatar(const QString& name);
     void updateAvatarOnItems(const QString& url, const QPixmap& pixmap);
@@ -125,15 +125,20 @@ private:
     void updateMessageStatus(const QString& messageId, MessageStatus newStatus);
     MessageStatus calculateMessageStatus(const Message& msg, const Chat& chat);
 
-    // Tray + notifications
     void setupTrayIcon();
     void showNotificationForMessage(const Message& msg);
+
+    void fetchContacts();
+    void fetchProfileSummary();
+    void populateContactList();
+    void updateSidebarProfile();
+    void refreshProfileTab();
+    void refreshStarsTab();
 
 private:
     WebSocketClient* m_client = nullptr;
     QNetworkAccessManager* m_nam = nullptr;
 
-    // UI Elements
     QStackedWidget* m_stackedWidget = nullptr;
     QWidget* m_loginPage = nullptr;
     QWidget* m_appPage = nullptr;
@@ -143,10 +148,25 @@ private:
     QPushButton* m_loginBtn = nullptr;
     QLabel* m_statusLabel = nullptr;
 
+    QWidget* m_sidebarShell = nullptr;
+    QWidget* m_sidebarHeader = nullptr;
+    QLabel* m_sidebarDisplayNameLabel = nullptr;
+    QLabel* m_sidebarHandleLabel = nullptr;
+
     QListWidget* m_chatListWidget = nullptr;
     QListWidget* m_contactListWidget = nullptr;
     QTabWidget* m_sidebarTabs = nullptr;
     QWidget* m_settingsTab = nullptr;
+    QWidget* m_starsTab = nullptr;
+    QWidget* m_profileTab = nullptr;
+
+    QLabel* m_profileBioLabel = nullptr;
+    QLabel* m_profileStatsLabel = nullptr;
+    QListWidget* m_profileGiftsList = nullptr;
+    QListWidget* m_profileGroupsList = nullptr;
+
+    QLabel* m_starsBalanceLabel = nullptr;
+    QLabel* m_starsHintLabel = nullptr;
 
     QWidget* m_chatAreaWidget = nullptr;
     QLabel* m_chatTitle = nullptr;
@@ -155,51 +175,47 @@ private:
     QLineEdit* m_messageInput = nullptr;
     QPushButton* m_sendBtn = nullptr;
 
-    // Edit mode UI
     QWidget* m_editBar = nullptr;
     QLabel* m_editLabel = nullptr;
     QPushButton* m_cancelEditBtn = nullptr;
 
-    // Reply mode UI
     QWidget* m_replyBar = nullptr;
     QLabel* m_replyLabel = nullptr;
     QPushButton* m_cancelReplyBtn = nullptr;
 
-    // Checkbox for notifications
     QCheckBox* m_notificationsCheck = nullptr;
 
-    // Data
     QMap<QString, User> m_users;
+    QMap<QString, ContactEntry> m_contacts;
     QMap<QString, Chat> m_chats;
     QString m_currentChatId;
 
     bool m_isDarkMode = false;
-
-    // Notification state
     bool m_notificationsEnabled = true;
+    bool m_contactsLoaded = false;
 
-    // Highlight state
+    QString m_authToken;
+    User m_currentAccount;
+    QString m_profileBio;
+    QStringList m_profileGifts;
+    QStringList m_profileGroups;
+    double m_starsBalance = 0.0;
+
     QString m_highlightedMessageId;
-
-    // Pending message tracking for optimistic sends
     QMap<QString, Message> m_pendingMessages;
 
-    // Edit mode state
     QString m_editingMessageId;
     QString m_editingOriginalText;
 
-    // Reply mode state
     QString m_replyingToMessageId;
     QString m_replyingToText;
     QString m_replyingToSender;
 
     bool m_isLoadingHistory = false;
 
-    // Avatar Cache
     QMap<QString, QPixmap> m_avatarCache;
     QSet<QString> m_pendingDownloads;
 
-    // Tray
     QSystemTrayIcon* m_trayIcon = nullptr;
     QMenu* m_trayMenu = nullptr;
     QAction* m_trayShowHideAction = nullptr;
