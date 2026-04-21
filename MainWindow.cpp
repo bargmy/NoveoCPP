@@ -2101,6 +2101,7 @@ void MainWindow::onLogoutClicked() {
     m_reconnectAttempts = 0;
     m_waitingForSessionReconnectResult = false;
     m_hasAuthenticatedSession = false;
+    m_blockAutoSessionReconnect = false;
     if (!m_currentVoiceChatId.isEmpty()) {
         m_client->voiceLeave(m_currentVoiceChatId);
     }
@@ -2201,7 +2202,7 @@ void MainWindow::onLogoutClicked() {
 
 void MainWindow::tryReconnectWithSavedSession()
 {
-    if (m_waitingForSessionReconnectResult) {
+    if (m_waitingForSessionReconnectResult || m_blockAutoSessionReconnect) {
         return;
     }
 
@@ -2224,6 +2225,7 @@ void MainWindow::onDisconnected()
     if (m_waitingForSessionReconnectResult) {
         m_waitingForSessionReconnectResult = false;
         m_hasAuthenticatedSession = false;
+        m_blockAutoSessionReconnect = true;
         SessionStore::clear();
         m_restClient->clearAuthContext();
         m_authToken.clear();
@@ -2356,6 +2358,7 @@ void MainWindow::onLoginBtnClicked() {
     }
 
     m_waitingForSessionReconnectResult = false;
+    m_blockAutoSessionReconnect = false;
     m_statusLabel->setStyleSheet("color: #6b7280;");
     m_statusLabel->setText("Logging in...");
     m_loginBtn->setEnabled(false);
@@ -2385,6 +2388,7 @@ void MainWindow::onRegisterBtnClicked()
     }
 
     m_waitingForSessionReconnectResult = false;
+    m_blockAutoSessionReconnect = false;
     m_statusLabel->setStyleSheet("color: #6b7280;");
     m_statusLabel->setText("Registering...");
     m_loginBtn->setEnabled(false);
@@ -2403,6 +2407,7 @@ void MainWindow::onLoginSuccess(const User& user, const QString& token, qint64 e
     m_reconnectAttempts = 0;
     m_waitingForSessionReconnectResult = false;
     m_hasAuthenticatedSession = true;
+    m_blockAutoSessionReconnect = false;
     if (m_reconnectTimer) {
         m_reconnectTimer->stop();
     }
@@ -2447,6 +2452,7 @@ void MainWindow::onAuthFailed(const QString& msg) {
     m_reconnectAttempts = 0;
     m_waitingForSessionReconnectResult = false;
     m_hasAuthenticatedSession = false;
+    m_blockAutoSessionReconnect = reconnectFailure;
     SessionStore::clear();
     m_restClient->clearAuthContext();
     m_authToken.clear();
