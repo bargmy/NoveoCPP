@@ -2202,6 +2202,11 @@ void MainWindow::onLogoutClicked() {
 
 void MainWindow::tryReconnectWithSavedSession()
 {
+    const bool autoSessionReconnectEnabled = qEnvironmentVariableIntValue("NOVEO_ENABLE_AUTO_SESSION_RECONNECT") == 1;
+    if (!autoSessionReconnectEnabled) {
+        return;
+    }
+
     if (m_waitingForSessionReconnectResult || m_blockAutoSessionReconnect) {
         return;
     }
