@@ -1,54 +1,87 @@
-﻿#ifndef DATASTRUCTURES_H
+#ifndef DATASTRUCTURES_H
 #define DATASTRUCTURES_H
 
+#include <QMap>
+#include <QJsonObject>
+#include <QJsonValue>
 #include <QString>
 #include <QStringList>
-#include <QJsonObject>
+
 #include <vector>
 
 // Message delivery status
 enum class MessageStatus {
-    Pending,   // Waiting for server confirmation (⏱)
-    Sent,      // Confirmed by server (✓)
-    Seen       // Seen by recipient(s) (✓✓)
+    Pending,   // Waiting for server confirmation
+    Sent,      // Confirmed by server
+    Seen       // Seen by recipient(s)
+};
+
+struct FileAttachment {
+    QString url;
+    QString name;
+    QString type;
+    qint64 size = 0;
+
+    bool isNull() const {
+        return url.isEmpty() && name.isEmpty() && type.isEmpty() && size == 0;
+    }
+};
+
+struct ForwardedInfo {
+    QString from;
+    qint64 originalTs = 0;
+
+    bool isNull() const {
+        return from.isEmpty() && originalTs <= 0;
+    }
 };
 
 struct User {
     QString userId;
     QString username;
     QString avatarUrl;
-    bool online;
+    bool online = false;
+    bool blockGroupInvites = false;
 };
 
 struct Message {
     QString messageId;
     QString chatId;
     QString senderId;
+    QString senderName;
+    QString senderAvatarUrl;
     QString text;
-    qint64 timestamp;
+    qint64 timestamp = 0;
 
-    // NEW: Status tracking
-    MessageStatus status = MessageStatus::Sent;  // Default for received messages
+    // Keep raw content payload for forward compatibility with server updates.
+    QString rawContent;
+    FileAttachment file;
+    QString theme;
+    ForwardedInfo forwardedInfo;
 
-    // NEW: Seen tracking
-    QStringList seenBy;  // List of user IDs who have seen this message
-
-    // NEW: Edit tracking
-    qint64 editedAt = 0;  // Timestamp when edited (0 = not edited)
-
-    // NEW: Reply tracking
-    QString replyToId;  // Message ID this is replying to (empty = not a reply)
+    MessageStatus status = MessageStatus::Sent;
+    QStringList seenBy;
+    qint64 editedAt = 0;
+    QString replyToId;
+    bool pending = false;
 };
 
 struct Chat {
     QString chatId;
     QString chatName; // For groups/channels
-    QString chatType; // 'private', 'group', 'channel'
+    QString chatType; // "private", "group", "channel"
+    QString handle;
     QStringList members;
     QString ownerId;
     std::vector<Message> messages;
-    int unreadCount;
+    int unreadCount = 0;
     QString avatarUrl;
+    bool isVerified = false;
+    qint64 createdAt = 0;
+    bool hasPinnedMessage = false;
+    Message pinnedMessage;
 };
+
+using VoiceChatParticipants = QMap<QString, QStringList>;
 
 #endif // DATASTRUCTURES_H
