@@ -163,7 +163,6 @@ void UserListDelegate::paint(QPainter* painter,
     option.widget->style()->drawPrimitive(QStyle::PE_PanelItemViewItem, &opt, painter, option.widget);
 
     QString fullText = index.data(Qt::DisplayRole).toString();
-    // FIX: Replaced qvariant_cast with value<QIcon>()
     QIcon icon = index.data(Qt::DecorationRole).value<QIcon>();
     QRect rect = opt.rect;
 
@@ -253,8 +252,8 @@ public:
     }
 
     void getBubbleLayout(const QString& text, const QString& sender, bool isMe, int viewWidth,
-                         QRect& bubbleRect, QRect& textRect, QRect& nameRect, QRect& avatarRect, 
-                         int& neededHeight, bool hasReply, const QString& replyText, QRect& replyQuoteRect) const 
+                         QRect& bubbleRect, QRect& textRect, QRect& nameRect, QRect& avatarRect,
+                         int& neededHeight, bool hasReply, const QString& replyText, QRect& replyQuoteRect) const
     {
         const int safeViewWidth = (viewWidth > 0) ? viewWidth : 420;
         const int maxBubbleWidth = qBound(220, static_cast<int>(safeViewWidth * 0.72), 720);
@@ -315,9 +314,9 @@ public:
         int textWidth = doc.idealWidth();
         int textHeight = doc.size().height();
 
-        int contentWidth = isMe ? qMax(textWidth + 20, replyQuoteWidth) 
+        int contentWidth = isMe ? qMax(textWidth + 20, replyQuoteWidth)
                                 : qMax(textWidth + 20, qMax(totalNameWidth + 30, replyQuoteWidth));
-        
+
         int bubbleW = qMax(contentWidth, 100);
         int bubbleH = textHeight + nameHeight + replyQuoteHeight + timeHeight + bubblePadding;
 
@@ -361,7 +360,6 @@ public:
         QString sender = index.data(Qt::UserRole + 2).toString();
         qint64 timestamp = index.data(Qt::UserRole + 3).toLongLong();
         bool isMe = index.data(Qt::UserRole + 4).toBool();
-        // FIX: Replaced qvariant_cast with value<QIcon>()
         QIcon avatar = index.data(Qt::DecorationRole).value<QIcon>();
         QString replyToId = index.data(Qt::UserRole + 9).toString();
         QString messageId = index.data(Qt::UserRole + 6).toString();
@@ -374,10 +372,9 @@ public:
             replyText = index.data(Qt::UserRole + 10).toString();
         }
 
-        // Pass 'replyQuoteRect' which is a local QRect variable
         const int viewWidth = option.widget ? option.widget->width() : option.rect.width();
-        getBubbleLayout(text, sender, isMe, viewWidth, 
-                        bubbleRect, textRect, nameRect, avatarRect, neededHeight, 
+        getBubbleLayout(text, sender, isMe, viewWidth,
+                        bubbleRect, textRect, nameRect, avatarRect, neededHeight,
                         hasReply, replyText, replyQuoteRect);
 
         bubbleRect.translate(0, option.rect.top());
@@ -394,7 +391,7 @@ public:
         QColor borderColor;
         QColor textColor;
         QColor timeColor;
-        
+
         bool isHighlighted = (messageId == m_highlightedMessageId);
 
         if (m_isDarkMode) {
@@ -454,7 +451,7 @@ public:
                 painter->setBrush(tagColor);
                 painter->setPen(Qt::NoPen);
                 painter->drawRoundedRect(tagX, tagY, tagW, tagH, 3, 3);
-                
+
                 painter->setPen(Qt::white);
                 QFont tagFont = nameFont;
                 tagFont.setPixelSize(9);
@@ -463,7 +460,6 @@ public:
             }
         }
 
-        // Draw Reply Quote
         if (!replyToId.isEmpty()) {
             QString replySenderName = index.data(Qt::UserRole + 11).toString();
             int replyX = replyQuoteRect.left();
@@ -479,7 +475,6 @@ public:
                 replyY += senderFm.height() + 2;
             }
 
-            // Vertical line
             painter->setPen(m_isDarkMode ? QColor("#666") : QColor("#ccc"));
             painter->drawLine(replyX, replyY, replyX, replyY + 20);
 
@@ -496,7 +491,6 @@ public:
             painter->drawText(replyX + 6, replyY + replyFm.ascent() + 2, replyPreview);
         }
 
-        // Draw Message Text
         painter->setPen(textColor);
         QTextDocument doc;
         QTextOption wrapOption;
@@ -514,7 +508,6 @@ public:
         doc.drawContents(painter);
         painter->translate(-textRect.topLeft());
 
-        // Draw Time & Status
         QDateTime dt;
         dt.setSecsSinceEpoch(timestamp);
         QString timeStr = dt.toString("hh:mm AP");
@@ -557,7 +550,7 @@ public:
                     int iconY = bubbleRect.bottom() - 5 - timeFm.height();
                     painter->drawText(iconX, iconY + fm.ascent(), checkmark);
                     painter->drawText(iconX + overlapOffset, iconY + fm.ascent(), checkmark);
-                    statusIcon.clear(); 
+                    statusIcon.clear();
                 } else {
                     statusIcon = "vv";
                     statusColor = m_isDarkMode ? QColor("#93C5FD") : QColor("#60A5FA");
@@ -609,7 +602,6 @@ public:
 
         QRect b, t, n, a, r;
         int h;
-        // Pass 'r' which is local
         int widthHint = option.rect.width();
         if (widthHint <= 0 && option.widget) {
             widthHint = option.widget->width();
@@ -630,18 +622,17 @@ public:
                     QString text = index.data(Qt::UserRole + 1).toString();
                     QString sender = index.data(Qt::UserRole + 2).toString();
                     bool isMe = index.data(Qt::UserRole + 4).toBool();
-                    
+
                     QRect bubbleRect, textRect, nameRect, avatarRect, replyQuoteRect;
                     int neededHeight;
                     QString replyText = index.data(Qt::UserRole + 10).toString();
                     bool hasReply = true;
-                    
-                    // Pass 'replyQuoteRect' which is local
+
                     const int viewWidth = option.widget ? option.widget->width() : option.rect.width();
-                    getBubbleLayout(text, sender, isMe, viewWidth, 
-                                    bubbleRect, textRect, nameRect, avatarRect, neededHeight, 
+                    getBubbleLayout(text, sender, isMe, viewWidth,
+                                    bubbleRect, textRect, nameRect, avatarRect, neededHeight,
                                     hasReply, replyText, replyQuoteRect);
-                    
+
                     replyQuoteRect.translate(0, option.rect.top());
                     if (replyQuoteRect.contains(mouseEvent->pos())) {
                         if (m_mainWindow) {
@@ -931,7 +922,6 @@ void MainWindow::setupUi() {
     m_stackedWidget = new QStackedWidget(this);
     setCentralWidget(m_stackedWidget);
 
-    // Login Page
     m_loginPage = new QWidget();
     m_loginPage->setObjectName("loginPage");
     QVBoxLayout* loginLayout = new QVBoxLayout(m_loginPage);
@@ -1043,14 +1033,12 @@ void MainWindow::setupUi() {
 
     m_stackedWidget->addWidget(m_loginPage);
 
-    // App Page
     m_appPage = new QWidget();
     m_appPage->setMinimumHeight(0);
     QHBoxLayout* appLayout = new QHBoxLayout(m_appPage);
     appLayout->setContentsMargins(0, 0, 0, 0);
     appLayout->setSpacing(0);
 
-    // Sidebar
     m_chatListWidget = new QListWidget();
     m_chatListWidget->setObjectName("sidebarChatList");
     m_chatListWidget->setIconSize(QSize(42, 42));
@@ -1209,7 +1197,6 @@ void MainWindow::setupUi() {
     m_sidebarAudioPlayer->hide();
     sidebarLayout->addWidget(m_sidebarAudioPlayer);
 
-    // Chat Area
     m_chatAreaWidget = new QWidget();
     m_chatAreaWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     m_chatAreaWidget->setMinimumHeight(0);
@@ -1217,7 +1204,6 @@ void MainWindow::setupUi() {
     chatAreaLayout->setContentsMargins(0, 0, 0, 0);
     chatAreaLayout->setSpacing(0);
 
-    // Header
     QWidget* header = new QWidget();
     header->setObjectName("chatHeader");
     header->setFixedHeight(60);
@@ -1264,7 +1250,6 @@ void MainWindow::setupUi() {
     pinnedLayout->addWidget(m_openPinnedBtn);
     pinnedLayout->addWidget(m_unpinPinnedBtn);
 
-    // Messages
     m_chatList = new QListWidget();
     m_chatList->setObjectName("chatList");
     m_chatList->setFrameShape(QFrame::NoFrame);
@@ -1285,7 +1270,6 @@ void MainWindow::setupUi() {
     connect(m_chatList, &QListWidget::clicked, this, &MainWindow::onChatListItemClicked);
     connect(m_chatList->verticalScrollBar(), &QScrollBar::valueChanged, this, &MainWindow::onScrollValueChanged);
 
-    // Reply Bar
     m_replyBar = new QWidget();
     m_replyBar->setObjectName("replyBar");
     m_replyBar->setFixedHeight(40);
@@ -1314,7 +1298,6 @@ void MainWindow::setupUi() {
 
     connect(m_cancelReplyBtn, &QPushButton::clicked, this, &MainWindow::onCancelReply);
 
-    // Edit Bar
     m_editBar = new QWidget();
     m_editBar->setObjectName("editBar");
     m_editBar->setFixedHeight(35);
@@ -1323,10 +1306,10 @@ void MainWindow::setupUi() {
 
     QHBoxLayout* editBarLayout = new QHBoxLayout(m_editBar);
     editBarLayout->setContentsMargins(10, 5, 10, 5);
-    
+
     m_editLabel = new QLabel("Editing: ");
     m_editLabel->setStyleSheet("color: #888; font-style: italic;");
-    
+
     m_cancelEditBtn = new QPushButton("X");
     m_cancelEditBtn->setFixedSize(25, 25);
     m_cancelEditBtn->setCursor(Qt::PointingHandCursor);
@@ -1338,7 +1321,6 @@ void MainWindow::setupUi() {
 
     connect(m_cancelEditBtn, &QPushButton::clicked, this, &MainWindow::onCancelEdit);
 
-    // Input Area
     m_inputArea = new QWidget();
     m_inputArea->setObjectName("inputArea");
     m_inputArea->setFixedHeight(60);
@@ -1515,7 +1497,6 @@ void MainWindow::setupUi() {
     updateContactsOverlayGeometry();
     updateSidebarMenuGeometry();
 
-    // Connections
     connect(m_loginBtn, &QPushButton::clicked, this, &MainWindow::onLoginBtnClicked);
     connect(m_registerBtn, &QPushButton::clicked, this, &MainWindow::onRegisterBtnClicked);
     connect(m_showRegisterSwitchBtn, &QPushButton::clicked, this, [this]() {
@@ -2118,6 +2099,8 @@ void MainWindow::onLogoutClicked() {
         m_reconnectTimer->stop();
     }
     m_reconnectAttempts = 0;
+    m_waitingForSessionReconnectResult = false;
+    m_hasAuthenticatedSession = false;
     if (!m_currentVoiceChatId.isEmpty()) {
         m_client->voiceLeave(m_currentVoiceChatId);
     }
@@ -2190,7 +2173,7 @@ void MainWindow::onLogoutClicked() {
     m_isLoadingHistory = false;
     m_avatarCache.clear();
     m_pendingDownloads.clear();
-    
+
     m_chatListWidget->clear();
     m_contactListWidget->clear();
     m_chatList->clear();
@@ -2203,7 +2186,7 @@ void MainWindow::onLogoutClicked() {
     if (m_chatSettingsBtn) {
         m_chatSettingsBtn->setVisible(false);
     }
-    
+
     m_loginBtn->setEnabled(false);
     m_statusLabel->setStyleSheet("color: #6b7280;");
     m_statusLabel->setText("Resetting connection...");
@@ -2218,11 +2201,16 @@ void MainWindow::onLogoutClicked() {
 
 void MainWindow::tryReconnectWithSavedSession()
 {
+    if (m_waitingForSessionReconnectResult) {
+        return;
+    }
+
     const SessionData session = SessionStore::load();
     if (!session.isPresent()) {
         return;
     }
 
+    m_waitingForSessionReconnectResult = true;
     m_statusLabel->setText("Reconnecting session...");
     m_client->reconnectWithToken(session.userId, session.token);
 }
@@ -2230,6 +2218,44 @@ void MainWindow::tryReconnectWithSavedSession()
 void MainWindow::onDisconnected()
 {
     if (m_manualDisconnect) {
+        return;
+    }
+
+    if (m_waitingForSessionReconnectResult) {
+        m_waitingForSessionReconnectResult = false;
+        m_hasAuthenticatedSession = false;
+        SessionStore::clear();
+        m_restClient->clearAuthContext();
+        m_authToken.clear();
+        m_authExpiresAt = 0;
+        m_stackedWidget->setCurrentWidget(m_loginPage);
+        m_statusLabel->setStyleSheet("color: #ef4444;");
+        m_statusLabel->setText("Saved session expired. Please log in again.");
+        if (m_sidebarTitleLabel) {
+            m_sidebarTitleLabel->setText("Noveo");
+        }
+        hideSidebarMenu();
+        if (m_contactsOverlay) {
+            m_contactsOverlay->hide();
+        }
+        hideStickerPanel();
+        if (m_settingsDialog) {
+            m_settingsDialog->hide();
+        }
+        if (m_settingsOverlay) {
+            m_settingsOverlay->hide();
+        }
+        if (m_chatSettingsDialog) {
+            m_chatSettingsDialog->hide();
+        }
+        m_loginBtn->setEnabled(true);
+        m_registerBtn->setEnabled(true);
+        if (m_showRegisterSwitchBtn) {
+            m_showRegisterSwitchBtn->setEnabled(true);
+        }
+        if (m_showLoginSwitchBtn) {
+            m_showLoginSwitchBtn->setEnabled(true);
+        }
         return;
     }
 
@@ -2265,6 +2291,7 @@ void MainWindow::onDisconnected()
         m_restClient->clearAuthContext();
         m_authToken.clear();
         m_authExpiresAt = 0;
+        m_hasAuthenticatedSession = false;
         m_stackedWidget->setCurrentWidget(m_loginPage);
         hideSidebarMenu();
         if (m_contactsOverlay) {
@@ -2328,6 +2355,7 @@ void MainWindow::onLoginBtnClicked() {
         return;
     }
 
+    m_waitingForSessionReconnectResult = false;
     m_statusLabel->setStyleSheet("color: #6b7280;");
     m_statusLabel->setText("Logging in...");
     m_loginBtn->setEnabled(false);
@@ -2356,6 +2384,7 @@ void MainWindow::onRegisterBtnClicked()
         return;
     }
 
+    m_waitingForSessionReconnectResult = false;
     m_statusLabel->setStyleSheet("color: #6b7280;");
     m_statusLabel->setText("Registering...");
     m_loginBtn->setEnabled(false);
@@ -2372,6 +2401,8 @@ void MainWindow::onRegisterBtnClicked()
 void MainWindow::onLoginSuccess(const User& user, const QString& token, qint64 expiresAt) {
     m_manualDisconnect = false;
     m_reconnectAttempts = 0;
+    m_waitingForSessionReconnectResult = false;
+    m_hasAuthenticatedSession = true;
     if (m_reconnectTimer) {
         m_reconnectTimer->stop();
     }
@@ -2412,7 +2443,10 @@ void MainWindow::onAuthFailed(const QString& msg) {
     if (m_reconnectTimer) {
         m_reconnectTimer->stop();
     }
+    const bool reconnectFailure = m_waitingForSessionReconnectResult;
     m_reconnectAttempts = 0;
+    m_waitingForSessionReconnectResult = false;
+    m_hasAuthenticatedSession = false;
     SessionStore::clear();
     m_restClient->clearAuthContext();
     m_authToken.clear();
@@ -2445,7 +2479,7 @@ void MainWindow::onAuthFailed(const QString& msg) {
     updatePinnedMessageBar();
     m_statusLabel->setStyleSheet("color: #ef4444;");
     m_stackedWidget->setCurrentWidget(m_loginPage);
-    m_statusLabel->setText("Auth failed: " + msg);
+    m_statusLabel->setText(reconnectFailure ? "Saved session expired. Please log in again." : "Auth failed: " + msg);
     m_loginBtn->setEnabled(true);
     m_registerBtn->setEnabled(true);
     if (m_showRegisterSwitchBtn) {
@@ -2528,7 +2562,7 @@ void MainWindow::onChatHistoryReceived(const std::vector<Chat>& incomingChats) {
 
                 if (m_currentChatId == inChat.chatId && m_isLoadingHistory) {
                     m_isLoadingHistory = false;
-                    
+
                     std::sort(newMessages.begin(), newMessages.end(), [](const Message& a, const Message& b) {
                         return a.timestamp < b.timestamp;
                     });
@@ -2552,7 +2586,7 @@ void MainWindow::onChatHistoryReceived(const std::vector<Chat>& incomingChats) {
         m_chatListWidget->clear();
         std::vector<Chat> sortedChats;
         for (auto k : m_chats.keys()) sortedChats.push_back(m_chats[k]);
-        
+
         std::sort(sortedChats.begin(), sortedChats.end(), [](const Chat& a, const Chat& b) {
             qint64 timeA = a.messages.empty() ? 0 : a.messages.back().timestamp;
             qint64 timeB = b.messages.empty() ? 0 : b.messages.back().timestamp;
@@ -2563,7 +2597,7 @@ void MainWindow::onChatHistoryReceived(const std::vector<Chat>& incomingChats) {
             QListWidgetItem* item = new QListWidgetItem(m_chatListWidget);
             QString name = resolveChatName(chat);
             QString url = chat.avatarUrl;
-            
+
             if (chat.chatType == "private" && url.isEmpty()) {
                 for (const auto& memberId : chat.members) {
                     if (memberId != m_client->currentUserId() && m_users.contains(memberId)) {
@@ -2574,7 +2608,7 @@ void MainWindow::onChatHistoryReceived(const std::vector<Chat>& incomingChats) {
             }
 
             if (url.startsWith("/")) url = API_BASE_URL + url;
-            
+
             item->setText(name);
             item->setData(Qt::UserRole, chat.chatId);
             item->setData(AvatarUrlRole, url);
@@ -2596,7 +2630,7 @@ void MainWindow::onNewChatCreated(const Chat& chat) {
     if (!m_chats.contains(chat.chatId)) {
         m_chats.insert(chat.chatId, chat);
         QListWidgetItem* item = new QListWidgetItem(m_chatListWidget);
-        
+
         QString name = resolveChatName(chat);
         QString url = chat.avatarUrl;
         if (chat.chatType == "private" && url.isEmpty()) {
@@ -2653,20 +2687,20 @@ QIcon MainWindow::generateGenericAvatar(const QString& name) {
     pixmap.fill(Qt::transparent);
     QPainter painter(&pixmap);
     painter.setRenderHint(QPainter::Antialiasing);
-    
+
     painter.setBrush(getColorForName(name));
     painter.setPen(Qt::NoPen);
     painter.drawEllipse(0, 0, 42, 42);
-    
+
     painter.setPen(Qt::white);
     QFont font = painter.font();
     font.setPixelSize(20);
     font.setBold(true);
     painter.setFont(font);
-    
+
     QString letter = name.isEmpty() ? "?" : name.left(1).toUpper();
     painter.drawText(QRect(0, 0, 42, 42), Qt::AlignCenter, letter);
-    
+
     return QIcon(pixmap);
 }
 
@@ -2722,12 +2756,12 @@ QIcon MainWindow::getAvatar(const QString& name, const QString& urlIn) {
                     QPainterPath path;
                     path.addEllipse(0, 0, 42, 42);
                     p.setClipPath(path);
-                    
+
                     int sourceSize = qMin(pixmap.width(), pixmap.height());
                     int x = (pixmap.width() - sourceSize) / 2;
                     int y = (pixmap.height() - sourceSize) / 2;
                     QPixmap cropped = pixmap.copy(x, y, sourceSize, sourceSize);
-                    
+
                     p.drawPixmap(0, 0, 42, 42, cropped.scaled(42, 42, Qt::KeepAspectRatio, Qt::SmoothTransformation));
                     m_avatarCache.insert(fullUrl, circular);
 
@@ -2739,7 +2773,6 @@ QIcon MainWindow::getAvatar(const QString& name, const QString& urlIn) {
                     updateAvatarOnItems(fullUrl, circular);
                 }
             } else {
-                // Failed download, fallback
             }
         });
     }
@@ -2762,7 +2795,7 @@ void MainWindow::updateAvatarOnItems(const QString& url, const QPixmap& pixmap) 
             list->viewport()->update();
         }
     };
-    
+
     updateList(m_chatListWidget);
     updateList(m_contactListWidget);
     updateList(m_chatList);
@@ -4062,9 +4095,9 @@ QString MainWindow::getReplyPreviewText(const QString& replyToId, const QString&
 
     if (!replyText.isEmpty()) {
         QString trimmed = replyText.trimmed();
-        bool isJustURL = trimmed.startsWith("http") && 
+        bool isJustURL = trimmed.startsWith("http") &&
                          (trimmed.contains("/static/upload") || trimmed.contains("/static/upl"));
-        
+
         if (isJustURL) {
             QStringList words = trimmed.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
             if (words.size() == 1) {
@@ -4423,7 +4456,7 @@ void MainWindow::onMessageReceived(const Message& msg) {
 
     if (m_currentChatId == normalizedMsg.chatId) {
         bool wasAtBottom = isScrolledToBottom();
-        
+
         if (isPendingConfirmation) {
             for (int i = 0; i < m_chatList->count(); i++) {
                 QListWidgetItem* item = m_chatList->item(i);
@@ -4467,14 +4500,13 @@ void MainWindow::onMessageReceived(const Message& msg) {
     } else if (isPendingConfirmation) {
         m_pendingMessages.remove(pendingIdToRemove);
     }
-    
-    // NOTIFICATION HOOK
+
     showNotificationForMessage(normalizedMsg);
 }
 
 MessageStatus MainWindow::calculateMessageStatus(const Message& msg, const Chat& chat) {
     if (msg.senderId != m_client->currentUserId()) {
-        return MessageStatus::Sent; 
+        return MessageStatus::Sent;
     }
     if (msg.messageId.startsWith("temp_")) {
         return MessageStatus::Pending;
@@ -4507,7 +4539,7 @@ void MainWindow::onMessageSeenUpdate(const QString& chatId, const QString& messa
                 }
                 MessageStatus newStatus = calculateMessageStatus(msg, m_chats[chatId]);
                 msg.status = newStatus;
-                
+
                 if (m_currentChatId == chatId) {
                     updateMessageStatus(messageId, newStatus);
                 }
@@ -4813,22 +4845,22 @@ void MainWindow::onSendBtnClicked() {
     pendingMsg.text = text;
     pendingMsg.timestamp = QDateTime::currentSecsSinceEpoch();
     pendingMsg.status = MessageStatus::Pending;
-    
+
     if (!m_replyingToMessageId.isEmpty()) {
         pendingMsg.replyToId = m_replyingToMessageId;
     }
 
     m_pendingMessages[tempId] = pendingMsg;
-    
+
     bool wasAtBottom = isScrolledToBottom();
     addMessageBubble(pendingMsg, false, false);
-    
+
     if (wasAtBottom) {
         smoothScrollToBottom();
     }
 
     m_client->sendMessage(m_currentChatId, text, m_replyingToMessageId);
-    
+
     m_messageInput->clear();
     if (!m_replyingToMessageId.isEmpty()) {
         onCancelReply();
@@ -4898,7 +4930,6 @@ void MainWindow::onChatListItemClicked(const QModelIndex& index) {
         QDesktopServices::openUrl(QUrl(match.captured(1)));
     }
 }
-
 
 void MainWindow::setupTrayIcon()
 {
