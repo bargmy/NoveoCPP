@@ -61,10 +61,7 @@ public:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow();
 
-    // Helper to get clean reply preview text (public for MessageDelegate)
     QString getReplyPreviewText(const QString& replyToId, const QString& chatId);
-
-    // Focus helper
     void focusOnMessage(const QString& messageId);
 
 protected:
@@ -93,11 +90,8 @@ private slots:
 
     void onDarkModeToggled(bool checked);
     void onLogoutClicked();
-
-    // Notifications setting
     void onNotificationsToggled(bool checked);
 
-    // Context menu slots
     void onChatListContextMenu(const QPoint& pos);
     void onEditMessage();
     void onDeleteMessage();
@@ -113,13 +107,9 @@ private slots:
     void onPasswordChanged(const QString& token, qint64 expiresAt, const QString& warning);
     void onUserUpdated(const User& user);
 
-    // Scroll detection
     void onScrollValueChanged(int value);
-
-    // Click on replied message => focus original
     void onChatListItemClicked(const QModelIndex& index);
 
-    // Tray handlers
     void onTrayIconActivated(QSystemTrayIcon::ActivationReason reason);
     void onTrayShowHide();
     void onTrayQuit();
@@ -171,7 +161,6 @@ private:
     QString resolveChatName(const Chat& chat);
     QColor getColorForName(const QString& name);
 
-    // Avatar handling
     QIcon getAvatar(const QString& name, const QString& url);
     QIcon generateGenericAvatar(const QString& name);
     void updateAvatarOnItems(const QString& url, const QPixmap& pixmap);
@@ -183,7 +172,6 @@ private:
     void updateMessageStatus(const QString& messageId, MessageStatus newStatus);
     MessageStatus calculateMessageStatus(const Message& msg, const Chat& chat);
 
-    // Tray + notifications
     void setupTrayIcon();
     void showNotificationForMessage(const Message& msg);
 
@@ -194,7 +182,6 @@ private:
     UpdaterService* m_updaterService = nullptr;
     VoiceAudioBridge* m_voiceAudio = nullptr;
 
-    // UI Elements
     QStackedWidget* m_stackedWidget = nullptr;
     QWidget* m_loginPage = nullptr;
     QWidget* m_appPage = nullptr;
@@ -270,22 +257,18 @@ private:
     QGridLayout* m_stickerGridLayout = nullptr;
     bool m_stickerPanelVisible = false;
 
-    // Edit mode UI
     QWidget* m_editBar = nullptr;
     QLabel* m_editLabel = nullptr;
     QPushButton* m_cancelEditBtn = nullptr;
 
-    // Reply mode UI
     QWidget* m_replyBar = nullptr;
     QLabel* m_replyLabel = nullptr;
     QPushButton* m_cancelReplyBtn = nullptr;
 
-    // Updater state mirrored to settings dialog.
     QString m_updaterStatusText = QStringLiteral("Updater idle.");
     bool m_canDownloadUpdate = false;
     bool m_canInstallUpdate = false;
 
-    // Data
     QMap<QString, User> m_users;
     QMap<QString, Chat> m_chats;
     QString m_currentChatId;
@@ -297,16 +280,13 @@ private:
     int m_reconnectAttempts = 0;
     bool m_manualDisconnect = false;
     QTimer* m_reconnectTimer = nullptr;
+    bool m_waitingForSessionReconnectResult = false;
+    bool m_hasAuthenticatedSession = false;
 
     bool m_isDarkMode = false;
-
-    // Notification state
     bool m_notificationsEnabled = true;
-
-    // Highlight state
     QString m_highlightedMessageId;
 
-    // Pending message tracking for optimistic sends
     QMap<QString, Message> m_pendingMessages;
     QMap<QString, QListWidgetItem*> m_messageItemsById;
     QMap<QString, MessageItemWidget*> m_messageWidgetsById;
@@ -315,22 +295,18 @@ private:
     QTimer* m_messageResizeDebounceTimer = nullptr;
     int m_lastMessageViewportWidth = -1;
 
-    // Edit mode state
     QString m_editingMessageId;
     QString m_editingOriginalText;
 
-    // Reply mode state
     QString m_replyingToMessageId;
     QString m_replyingToText;
     QString m_replyingToSender;
 
     bool m_isLoadingHistory = false;
 
-    // Avatar Cache
     QMap<QString, QPixmap> m_avatarCache;
     QSet<QString> m_pendingDownloads;
 
-    // Tray
     QSystemTrayIcon* m_trayIcon = nullptr;
     QMenu* m_trayMenu = nullptr;
     QAction* m_trayShowHideAction = nullptr;
