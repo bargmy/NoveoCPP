@@ -43,7 +43,7 @@
 
 const int AvatarUrlRole = Qt::UserRole + 10;
 const QString API_BASE_URL = "https://noveo.ir:8443";
-const QString API_HTTP_BASE_URL = "https://api.pcpapc172.ir:8443";
+const QString API_HTTP_BASE_URL = API_BASE_URL;
 
 void UserListDelegate::paint(QPainter* painter,
                              const QStyleOptionViewItem& option,
