@@ -70,7 +70,7 @@ QString WebSocketClient::socketErrorToString(QAbstractSocket::SocketError error)
 
 void WebSocketClient::connectToServer() {
     const QUrl url(QStringLiteral("wss://noveo.ir:8443/ws"));
-    const QByteArray originHeader("http://localhost");
+    const QByteArray originHeader("https://localhost");
     emit debugLog(QString("connectToServer() called | currentState=%1 | target=%2")
                       .arg(socketStateToString(m_webSocket.state()))
                       .arg(url.toString()));
