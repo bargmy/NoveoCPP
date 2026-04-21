@@ -2212,6 +2212,7 @@ void MainWindow::tryReconnectWithSavedSession()
     }
 
     m_waitingForSessionReconnectResult = true;
+    m_blockAutoSessionReconnect = true; // one-shot until explicit auth succeeds
     m_statusLabel->setText("Reconnecting session...");
     m_client->reconnectWithToken(session.userId, session.token);
 }
