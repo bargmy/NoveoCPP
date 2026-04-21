@@ -51,4 +51,26 @@ struct Chat {
     QString avatarUrl;
 };
 
+struct ContactEntry {
+    QString userId;
+    QString username;
+    QString displayName;
+    QString alias;
+    QString avatarUrl;
+    bool fromApi = false;
+};
+
+struct ProfileData {
+    QString userId;
+    QString username;
+    QString displayName;
+    QString handle;
+    QString bio;
+    QString avatarUrl;
+    QJsonArray gifts;
+    QJsonArray groups;
+    QJsonArray mutualGroups;
+    double starsBalance = 0.0;
+};
+
 #endif // DATASTRUCTURES_H

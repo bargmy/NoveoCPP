@@ -35,9 +35,15 @@
 #include <QDialog>
 #include <QPlainTextEdit>
 #include <QShortcut>
+#include <QTextEdit>
+#include <QSplitter>
+#include <QJsonArray>
+#include <QJsonValue>
+#include <QFrame>
 
 const int AvatarUrlRole = Qt::UserRole + 10;
 const QString API_BASE_URL = "https://noveo.ir:8443";
+const QString API_HTTP_BASE_URL = "https://api.pcpapc172.ir:8443";
 
 void UserListDelegate::paint(QPainter* painter,
                              const QStyleOptionViewItem& option,
@@ -616,24 +622,121 @@ void MainWindow::setupUi() {
     appLayout->setContentsMargins(0, 0, 0, 0);
     appLayout->setSpacing(0);
 
-    // Sidebar
-    m_sidebarTabs = new QTabWidget();
-    m_sidebarTabs->setFixedWidth(300);
-    m_sidebarTabs->setTabPosition(QTabWidget::South);
+    // Sidebar shell (web-like IA: account header + sections)
+    m_sidebarWidget = new QWidget();
+    m_sidebarWidget->setFixedWidth(340);
+    QVBoxLayout* sidebarLayout = new QVBoxLayout(m_sidebarWidget);
+    sidebarLayout->setContentsMargins(0, 0, 0, 0);
+    sidebarLayout->setSpacing(0);
 
+    m_sidebarHeader = new QWidget();
+    m_sidebarHeader->setObjectName("sidebarHeader");
+    m_sidebarHeader->setFixedHeight(92);
+    QHBoxLayout* headerTopLayout = new QHBoxLayout(m_sidebarHeader);
+    headerTopLayout->setContentsMargins(14, 10, 14, 10);
+    headerTopLayout->setSpacing(10);
+
+    m_sidebarAvatar = new QLabel();
+    m_sidebarAvatar->setFixedSize(52, 52);
+    m_sidebarAvatar->setAlignment(Qt::AlignCenter);
+    m_sidebarAvatar->setStyleSheet("border-radius: 26px;");
+
+    QWidget* identityWrap = new QWidget();
+    QVBoxLayout* identityLayout = new QVBoxLayout(identityWrap);
+    identityLayout->setContentsMargins(0, 0, 0, 0);
+    identityLayout->setSpacing(2);
+    m_sidebarDisplayName = new QLabel("Noveo");
+    m_sidebarDisplayName->setStyleSheet("font-size: 16px; font-weight: 600;");
+    m_sidebarHandle = new QLabel("@...");
+    m_sidebarHandle->setStyleSheet("font-size: 12px; color: #7b7b7b;");
+    identityLayout->addWidget(m_sidebarDisplayName);
+    identityLayout->addWidget(m_sidebarHandle);
+
+    headerTopLayout->addWidget(m_sidebarAvatar);
+    headerTopLayout->addWidget(identityWrap);
+    headerTopLayout->addStretch();
+
+    m_sidebarNavList = new QListWidget();
+    m_sidebarNavList->setObjectName("sidebarNavList");
+    m_sidebarNavList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_sidebarNavList->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_sidebarNavList->setFixedHeight(214);
+    const QStringList navLabels = {"Chats", "Contacts", "Stars", "Profile", "Settings"};
+    for (const QString& label : navLabels) {
+        auto* navItem = new QListWidgetItem(label);
+        m_sidebarNavList->addItem(navItem);
+    }
+    m_sidebarNavList->setCurrentRow(0);
+
+    m_sidebarStack = new QStackedWidget();
+
+    m_chatsTab = new QWidget();
+    QVBoxLayout* chatsTabLayout = new QVBoxLayout(m_chatsTab);
+    chatsTabLayout->setContentsMargins(0, 0, 0, 0);
     m_chatListWidget = new QListWidget();
     m_chatListWidget->setIconSize(QSize(42, 42));
     m_chatListWidget->setItemDelegate(new UserListDelegate(this));
     m_chatListWidget->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    chatsTabLayout->addWidget(m_chatListWidget);
 
+    m_contactsTab = new QWidget();
+    QVBoxLayout* contactsTabLayout = new QVBoxLayout(m_contactsTab);
+    contactsTabLayout->setContentsMargins(0, 0, 0, 0);
     m_contactListWidget = new QListWidget();
     m_contactListWidget->setIconSize(QSize(42, 42));
     m_contactListWidget->setItemDelegate(new UserListDelegate(this));
     m_contactListWidget->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    contactsTabLayout->addWidget(m_contactListWidget);
+
+    m_starsTab = new QWidget();
+    QVBoxLayout* starsLayout = new QVBoxLayout(m_starsTab);
+    starsLayout->setContentsMargins(12, 12, 12, 12);
+    QLabel* starsTitle = new QLabel("Stars Wallet");
+    starsTitle->setStyleSheet("font-size: 15px; font-weight: 600;");
+    m_starsBalanceLabel = new QLabel("0.00 Stars");
+    m_starsBalanceLabel->setStyleSheet("font-size: 24px; font-weight: 700;");
+    m_starsInfo = new QTextEdit();
+    m_starsInfo->setReadOnly(true);
+    m_starsInfo->setMinimumHeight(220);
+    m_starsInfo->setPlainText("Wallet overview is loading...");
+    starsLayout->addWidget(starsTitle);
+    starsLayout->addWidget(m_starsBalanceLabel);
+    starsLayout->addWidget(m_starsInfo);
+    starsLayout->addStretch();
+
+    m_profileTab = new QWidget();
+    QVBoxLayout* profileLayout = new QVBoxLayout(m_profileTab);
+    profileLayout->setContentsMargins(12, 12, 12, 12);
+    m_profileAvatar = new QLabel();
+    m_profileAvatar->setFixedSize(72, 72);
+    m_profileAvatar->setAlignment(Qt::AlignCenter);
+    m_profileAvatar->setStyleSheet("border-radius: 36px;");
+    m_profileDisplayName = new QLabel("Display name");
+    m_profileDisplayName->setStyleSheet("font-size: 18px; font-weight: 700;");
+    m_profileUsername = new QLabel("username");
+    m_profileHandle = new QLabel("@handle");
+    m_profileBio = new QLabel("No bio yet.");
+    m_profileBio->setWordWrap(true);
+    m_profileGiftsList = new QListWidget();
+    m_profileGroupsList = new QListWidget();
+    m_profileMutualGroupsList = new QListWidget();
+    m_profileGiftsList->setMinimumHeight(96);
+    m_profileGroupsList->setMinimumHeight(96);
+    m_profileMutualGroupsList->setMinimumHeight(96);
+    profileLayout->addWidget(m_profileAvatar, 0, Qt::AlignHCenter);
+    profileLayout->addWidget(m_profileDisplayName);
+    profileLayout->addWidget(m_profileUsername);
+    profileLayout->addWidget(m_profileHandle);
+    profileLayout->addWidget(m_profileBio);
+    profileLayout->addWidget(new QLabel("Gifts"));
+    profileLayout->addWidget(m_profileGiftsList);
+    profileLayout->addWidget(new QLabel("Groups"));
+    profileLayout->addWidget(m_profileGroupsList);
+    profileLayout->addWidget(new QLabel("Mutual Groups"));
+    profileLayout->addWidget(m_profileMutualGroupsList);
 
     m_settingsTab = new QWidget();
     QVBoxLayout* settingsLayout = new QVBoxLayout(m_settingsTab);
-
     QCheckBox* darkModeCheck = new QCheckBox("Dark Mode");
     darkModeCheck->setChecked(m_isDarkMode);
     connect(darkModeCheck, &QCheckBox::toggled, this, &MainWindow::onDarkModeToggled);
@@ -659,9 +762,15 @@ void MainWindow::setupUi() {
     QShortcut* devConsoleShortcut = new QShortcut(QKeySequence("Ctrl+Shift+I"), this);
     connect(devConsoleShortcut, &QShortcut::activated, this, &MainWindow::onOpenDeveloperConsole);
 
-    m_sidebarTabs->addTab(m_chatListWidget, "Chats");
-    m_sidebarTabs->addTab(m_contactListWidget, "Contacts");
-    m_sidebarTabs->addTab(m_settingsTab, "Settings");
+    m_sidebarStack->addWidget(m_chatsTab);
+    m_sidebarStack->addWidget(m_contactsTab);
+    m_sidebarStack->addWidget(m_starsTab);
+    m_sidebarStack->addWidget(m_profileTab);
+    m_sidebarStack->addWidget(m_settingsTab);
+
+    sidebarLayout->addWidget(m_sidebarHeader);
+    sidebarLayout->addWidget(m_sidebarNavList);
+    sidebarLayout->addWidget(m_sidebarStack, 1);
 
     // Chat Area
     m_chatAreaWidget = new QWidget();
@@ -766,7 +875,7 @@ void MainWindow::setupUi() {
     chatAreaLayout->addWidget(m_editBar);
     chatAreaLayout->addWidget(inputArea);
 
-    appLayout->addWidget(m_sidebarTabs);
+    appLayout->addWidget(m_sidebarWidget);
     appLayout->addWidget(m_chatAreaWidget);
 
     m_stackedWidget->addWidget(m_appPage);
@@ -775,6 +884,7 @@ void MainWindow::setupUi() {
     connect(m_loginBtn, &QPushButton::clicked, this, &MainWindow::onLoginBtnClicked);
     connect(m_chatListWidget, &QListWidget::itemClicked, this, &MainWindow::onChatSelected);
     connect(m_contactListWidget, &QListWidget::itemClicked, this, &MainWindow::onContactSelected);
+    connect(m_sidebarNavList, &QListWidget::currentRowChanged, this, &MainWindow::onSidebarSectionChanged);
     connect(m_sendBtn, &QPushButton::clicked, this, &MainWindow::onSendBtnClicked);
     connect(m_messageInput, &QLineEdit::returnPressed, this, &MainWindow::onSendBtnClicked);
 }
@@ -799,12 +909,14 @@ void MainWindow::applyTheme() {
         "QListWidget::item { padding: 10px; border-bottom: 1px solid %4; }"
         "QListWidget::item:selected { background-color: #0088cc; color: white; }"
         "QListWidget::item:hover { background-color: %6; }"
-        "QTabWidget::pane { border: none; }"
-        "QTabBar::tab { background: %2; color: %3; padding: 10px; min-width: 80px; }"
-        "QTabBar::tab:selected { border-bottom: 2px solid #0088cc; }"
+        "#sidebarHeader { background-color: %2; border-bottom: 1px solid %4; }"
+        "#sidebarNavList { background-color: %2; border-bottom: 1px solid %4; }"
+        "#sidebarNavList::item { padding: 10px 14px; border-bottom: 1px solid %4; }"
+        "#sidebarNavList::item:selected { background-color: #0088cc; color: white; }"
         "#chatHeader { background-color: %2; border-bottom: 1px solid %4; }"
         "#inputArea { background-color: %2; border-top: 1px solid %4; }"
         "#chatList { background-color: %1; border: none; }"
+        "QTextEdit { border: 1px solid %4; border-radius: 6px; background-color: %5; color: %3; }"
         "QScrollBar:vertical { border: none; background: %2; width: 10px; margin: 0px; }"
         "QScrollBar::handle:vertical { background: %7; min-height: 20px; border-radius: 5px; }"
         "QScrollBar::handle:vertical:hover { background: %8; }"
@@ -824,6 +936,243 @@ void MainWindow::applyTheme() {
             m_chatList->viewport()->update();
         }
     }
+}
+
+void MainWindow::onSidebarSectionChanged(int row) {
+    if (!m_sidebarStack) return;
+    if (row < 0 || row >= m_sidebarStack->count()) return;
+    m_sidebarStack->setCurrentIndex(row);
+    if (row == 1) {
+        populateContactList();
+    } else if (row == 2) {
+        refreshStarsPanel();
+    } else if (row == 3) {
+        refreshProfilePanels();
+    }
+}
+
+QString MainWindow::normalizeAvatarUrl(const QString& url) const {
+    const QString trimmed = url.trimmed();
+    if (trimmed.isEmpty()) return QString();
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
+    if (trimmed.startsWith('/')) return API_BASE_URL + trimmed;
+    return API_BASE_URL + "/" + trimmed;
+}
+
+QJsonArray MainWindow::extractArrayFlexible(const QJsonDocument& doc, const QStringList& objectKeys) {
+    if (doc.isArray()) {
+        return doc.array();
+    }
+    if (!doc.isObject()) {
+        return QJsonArray();
+    }
+    const QJsonObject root = doc.object();
+    for (const QString& key : objectKeys) {
+        if (root.value(key).isArray()) {
+            return root.value(key).toArray();
+        }
+    }
+    return QJsonArray();
+}
+
+ContactEntry MainWindow::parseContactEntry(const QJsonObject& obj) const {
+    ContactEntry entry;
+    const QJsonObject nestedUser = obj.value("user").toObject();
+    auto val = [&](const QStringList& keys) -> QString {
+        for (const QString& key : keys) {
+            if (obj.contains(key) && !obj.value(key).isNull()) return obj.value(key).toVariant().toString();
+            if (nestedUser.contains(key) && !nestedUser.value(key).isNull()) return nestedUser.value(key).toVariant().toString();
+        }
+        return QString();
+    };
+
+    entry.userId = val({"userId", "id", "contactUserId"});
+    entry.username = val({"username", "handle", "login"});
+    entry.displayName = val({"displayName", "name", "label"});
+    entry.alias = val({"alias", "contactName", "saveAs", "name"});
+    entry.avatarUrl = normalizeAvatarUrl(val({"avatarUrl", "avatar", "photoUrl"}));
+    entry.fromApi = true;
+    return entry;
+}
+
+ProfileData MainWindow::parseProfileData(const QJsonObject& source) const {
+    QJsonObject obj = source;
+    if (source.contains("user") && source.value("user").isObject()) obj = source.value("user").toObject();
+    if (source.contains("data") && source.value("data").isObject()) obj = source.value("data").toObject();
+
+    ProfileData profile;
+    auto val = [&](const QStringList& keys) -> QString {
+        for (const QString& key : keys) {
+            if (obj.contains(key) && !obj.value(key).isNull()) return obj.value(key).toVariant().toString();
+        }
+        return QString();
+    };
+    profile.userId = val({"userId", "id"});
+    profile.username = val({"username", "login"});
+    profile.displayName = val({"displayName", "name"});
+    profile.handle = val({"handle", "username"});
+    profile.bio = val({"bio", "about", "description"});
+    profile.avatarUrl = normalizeAvatarUrl(val({"avatarUrl", "avatar", "photoUrl"}));
+    profile.gifts = obj.value("gifts").toArray();
+    if (profile.gifts.isEmpty()) profile.gifts = obj.value("ownedGifts").toArray();
+    profile.groups = obj.value("groups").toArray();
+    profile.mutualGroups = obj.value("mutualGroups").toArray();
+    profile.starsBalance = obj.value("starsBalance").toDouble();
+    if (qFuzzyIsNull(profile.starsBalance)) profile.starsBalance = obj.value("stars").toDouble();
+    if (qFuzzyIsNull(profile.starsBalance) && obj.value("wallet").isObject()) {
+        profile.starsBalance = obj.value("wallet").toObject().value("stars").toDouble();
+    }
+    return profile;
+}
+
+void MainWindow::fetchContacts() {
+    if (m_authToken.isEmpty() || m_currentUser.userId.isEmpty()) return;
+    QNetworkRequest req(QUrl(API_HTTP_BASE_URL + "/api/users/contacts"));
+    req.setRawHeader("X-User-ID", m_currentUser.userId.toUtf8());
+    req.setRawHeader("X-Auth-Token", m_authToken.toUtf8());
+    auto* reply = m_nam->get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        QByteArray body = reply->readAll();
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) return;
+        QJsonDocument doc = QJsonDocument::fromJson(body);
+        QJsonArray arr = extractArrayFlexible(doc, {"contacts", "data", "users"});
+        if (arr.isEmpty()) return;
+        m_contacts.clear();
+        for (const QJsonValue& value : arr) {
+            if (!value.isObject()) continue;
+            ContactEntry entry = parseContactEntry(value.toObject());
+            if (!entry.userId.isEmpty()) m_contacts.insert(entry.userId, entry);
+        }
+        populateContactList();
+        for (int i = 0; i < m_chatListWidget->count(); ++i) {
+            QListWidgetItem* item = m_chatListWidget->item(i);
+            const QString chatId = item->data(Qt::UserRole).toString();
+            if (m_chats.contains(chatId)) item->setText(resolveChatName(m_chats[chatId]));
+        }
+    });
+}
+
+void MainWindow::fetchMyProfile() {
+    if (m_authToken.isEmpty() || m_currentUser.userId.isEmpty()) return;
+    QNetworkRequest req(QUrl(API_HTTP_BASE_URL + "/api/users/me"));
+    req.setRawHeader("X-User-ID", m_currentUser.userId.toUtf8());
+    req.setRawHeader("X-Auth-Token", m_authToken.toUtf8());
+    auto* reply = m_nam->get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        QByteArray body = reply->readAll();
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) return;
+        QJsonDocument doc = QJsonDocument::fromJson(body);
+        if (!doc.isObject()) return;
+        m_myProfile = parseProfileData(doc.object());
+        if (!m_myProfile.displayName.isEmpty()) m_currentUser.username = m_myProfile.displayName;
+        updateIdentityHeader();
+        refreshProfilePanels();
+        refreshStarsPanel();
+    });
+}
+
+void MainWindow::fetchStarsOverview() {
+    if (m_authToken.isEmpty() || m_currentUser.userId.isEmpty()) return;
+    QNetworkRequest req(QUrl(API_HTTP_BASE_URL + "/stars/overview"));
+    req.setRawHeader("X-User-ID", m_currentUser.userId.toUtf8());
+    req.setRawHeader("X-Auth-Token", m_authToken.toUtf8());
+    auto* reply = m_nam->get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        QByteArray body = reply->readAll();
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) return;
+        QJsonDocument doc = QJsonDocument::fromJson(body);
+        if (!doc.isObject()) return;
+        const QJsonObject root = doc.object();
+        QJsonObject wallet = root.value("wallet").toObject();
+        if (wallet.contains("balanceTenths")) {
+            m_myProfile.starsBalance = wallet.value("balanceTenths").toDouble() / 100.0;
+        }
+        refreshStarsPanel();
+    });
+}
+
+void MainWindow::updateIdentityHeader() {
+    const QString display = !m_myProfile.displayName.isEmpty() ? m_myProfile.displayName
+        : (!m_currentUser.username.isEmpty() ? m_currentUser.username : "Noveo");
+    const QString username = !m_myProfile.username.isEmpty() ? m_myProfile.username : m_currentUser.username;
+    const QString handle = !m_myProfile.handle.isEmpty() ? m_myProfile.handle : username;
+    const QString avatar = !m_myProfile.avatarUrl.isEmpty() ? m_myProfile.avatarUrl : normalizeAvatarUrl(m_currentUser.avatarUrl);
+    m_sidebarDisplayName->setText(display);
+    m_sidebarHandle->setText(handle.startsWith("@") ? handle : ("@" + handle));
+    QIcon avatarIcon = getAvatar(display, avatar);
+    m_sidebarAvatar->setPixmap(avatarIcon.pixmap(52, 52));
+}
+
+void MainWindow::populateContactList() {
+    m_contactListWidget->clear();
+    for (auto it = m_contacts.begin(); it != m_contacts.end(); ++it) {
+        const ContactEntry& contact = it.value();
+        if (contact.userId == m_client->currentUserId()) continue;
+        QListWidgetItem* item = new QListWidgetItem(m_contactListWidget);
+        const QString name = !contact.alias.isEmpty() ? contact.alias :
+                             (!contact.displayName.isEmpty() ? contact.displayName :
+                              (!contact.username.isEmpty() ? contact.username : contact.userId));
+        item->setText(name);
+        item->setData(Qt::UserRole, contact.userId);
+        item->setData(AvatarUrlRole, contact.avatarUrl);
+        item->setIcon(getAvatar(name, contact.avatarUrl));
+    }
+    if (m_contactListWidget->count() == 0) {
+        for (auto it = m_users.begin(); it != m_users.end(); ++it) {
+            if (it.key() == m_client->currentUserId()) continue;
+            QListWidgetItem* item = new QListWidgetItem(m_contactListWidget);
+            item->setText(it.value().username);
+            item->setData(Qt::UserRole, it.key());
+            const QString avatar = normalizeAvatarUrl(it.value().avatarUrl);
+            item->setData(AvatarUrlRole, avatar);
+            item->setIcon(getAvatar(it.value().username, avatar));
+        }
+    }
+}
+
+void MainWindow::refreshProfilePanels() {
+    const QString displayName = !m_myProfile.displayName.isEmpty() ? m_myProfile.displayName : m_currentUser.username;
+    const QString username = !m_myProfile.username.isEmpty() ? m_myProfile.username : m_currentUser.username;
+    m_profileDisplayName->setText(displayName.isEmpty() ? "Unknown" : displayName);
+    m_profileUsername->setText(username);
+    QString handle = m_myProfile.handle.isEmpty() ? username : m_myProfile.handle;
+    if (!handle.startsWith("@")) handle = "@" + handle;
+    m_profileHandle->setText(handle);
+    m_profileBio->setText(m_myProfile.bio.isEmpty() ? "No bio yet." : m_myProfile.bio);
+    m_profileAvatar->setPixmap(getAvatar(displayName, m_myProfile.avatarUrl).pixmap(72, 72));
+
+    auto fillList = [](QListWidget* list, const QJsonArray& arr, const QString& emptyText) {
+        list->clear();
+        for (const QJsonValue& value : arr) {
+            if (value.isString()) list->addItem(value.toString());
+            else if (value.isObject()) {
+                QJsonObject o = value.toObject();
+                QString text = o.value("name").toString();
+                if (text.isEmpty()) text = o.value("title").toString();
+                if (text.isEmpty()) text = o.value("id").toString();
+                if (!text.isEmpty()) list->addItem(text);
+            }
+        }
+        if (list->count() == 0) list->addItem(emptyText);
+    };
+
+    fillList(m_profileGiftsList, m_myProfile.gifts, "No gifts yet.");
+    fillList(m_profileGroupsList, m_myProfile.groups, "No groups yet.");
+    fillList(m_profileMutualGroupsList, m_myProfile.mutualGroups, "No mutual groups.");
+}
+
+void MainWindow::refreshStarsPanel() {
+    m_starsBalanceLabel->setText(QString::number(m_myProfile.starsBalance, 'f', 2) + " Stars");
+    QString details;
+    details += "Wallet balance is shown from profile/wallet endpoints.\n\n";
+    details += QString("Gifts: %1 item(s)\n").arg(m_myProfile.gifts.size());
+    details += QString("Groups: %1\n").arg(m_myProfile.groups.size());
+    details += QString("Mutual Groups: %1\n").arg(m_myProfile.mutualGroups.size());
+    details += "\nSend/transactions actions are scaffolded on web and can be wired here when endpoint contracts are confirmed.";
+    m_starsInfo->setPlainText(details);
 }
 
 void MainWindow::onScrollValueChanged(int value) {
@@ -859,7 +1208,11 @@ void MainWindow::onLogoutClicked() {
     m_passwordInput->clear();
     m_chats.clear();
     m_users.clear();
+    m_contacts.clear();
     m_currentChatId.clear();
+    m_authToken.clear();
+    m_currentUser = User();
+    m_myProfile = ProfileData();
     m_isLoadingHistory = false;
     m_avatarCache.clear();
     m_pendingDownloads.clear();
@@ -868,6 +1221,11 @@ void MainWindow::onLogoutClicked() {
     m_contactListWidget->clear();
     m_chatList->clear();
     m_chatTitle->setText("Select a chat");
+    if (m_sidebarNavList) m_sidebarNavList->setCurrentRow(0);
+    if (m_sidebarStack) m_sidebarStack->setCurrentIndex(0);
+    updateIdentityHeader();
+    refreshProfilePanels();
+    refreshStarsPanel();
     
     m_loginBtn->setEnabled(false);
     m_statusLabel->setText("Resetting connection...");
@@ -940,8 +1298,13 @@ void MainWindow::onLoginSuccess(const User& user, const QString& token) {
     QSettings settings("Noveo", "MessengerClient");
     settings.setValue("username", m_usernameInput->text());
     settings.setValue("password", m_passwordInput->text());
-    
+    m_currentUser = user;
+    m_authToken = token;
     m_stackedWidget->setCurrentWidget(m_appPage);
+    updateIdentityHeader();
+    fetchContacts();
+    fetchMyProfile();
+    fetchStarsOverview();
 }
 
 void MainWindow::onAuthFailed(const QString& msg) {
@@ -950,33 +1313,18 @@ void MainWindow::onAuthFailed(const QString& msg) {
 
 void MainWindow::onUserListUpdated(const std::vector<User>& users) {
     m_users.clear();
-    m_contactListWidget->clear();
 
     for (const auto& u : users) {
         m_users.insert(u.userId, u);
-        if (u.userId == m_client->currentUserId()) continue;
-
-        QListWidgetItem* item = new QListWidgetItem(m_contactListWidget);
-        item->setText(u.username);
-        item->setData(Qt::UserRole, u.userId);
-
-        QString fullUrl = u.avatarUrl;
-        if (!fullUrl.startsWith("http")) {
-            fullUrl = API_BASE_URL + fullUrl;
-        }
-        item->setData(AvatarUrlRole, fullUrl);
-        item->setIcon(getAvatar(u.username, fullUrl));
     }
+    populateContactList();
 
     for (int i = 0; i < m_chatListWidget->count(); i++) {
         QListWidgetItem* item = m_chatListWidget->item(i);
         QString chatId = item->data(Qt::UserRole).toString();
         if (m_chats.contains(chatId)) {
             QString name = resolveChatName(m_chats[chatId]);
-            QString fullUrl = m_chats[chatId].avatarUrl;
-            if (!fullUrl.startsWith("http")) {
-                 fullUrl = API_BASE_URL + fullUrl;
-            }
+            QString fullUrl = normalizeAvatarUrl(m_chats[chatId].avatarUrl);
             item->setText(name);
             item->setData(AvatarUrlRole, fullUrl);
             item->setIcon(getAvatar(name, fullUrl));
@@ -1051,7 +1399,7 @@ void MainWindow::onChatHistoryReceived(const std::vector<Chat>& incomingChats) {
                 }
             }
 
-            if (url.startsWith("/")) url = API_BASE_URL + url;
+            url = normalizeAvatarUrl(url);
             
             item->setText(name);
             item->setData(Qt::UserRole, chat.chatId);
@@ -1077,7 +1425,7 @@ void MainWindow::onNewChatCreated(const Chat& chat) {
                 }
             }
         }
-        if (url.startsWith("/")) url = API_BASE_URL + url;
+        url = normalizeAvatarUrl(url);
 
         item->setText(name);
         item->setData(Qt::UserRole, chat.chatId);
@@ -1092,12 +1440,26 @@ QString MainWindow::resolveChatName(const Chat& chat) {
     if (chat.chatType == "private") {
         for (const auto& memberId : chat.members) {
             if (memberId != m_client->currentUserId()) {
-                if (m_users.contains(memberId)) return m_users[memberId].username;
+                return resolveUserDisplayName(memberId, "Unknown User");
             }
         }
         return "Unknown User";
     }
     return "Chat";
+}
+
+QString MainWindow::resolveUserDisplayName(const QString& userId, const QString& fallback) const {
+    if (m_contacts.contains(userId)) {
+        const ContactEntry& c = m_contacts[userId];
+        if (!c.alias.isEmpty()) return c.alias;
+        if (!c.displayName.isEmpty()) return c.displayName;
+        if (!c.username.isEmpty()) return c.username;
+    }
+    if (m_users.contains(userId) && !m_users[userId].username.isEmpty()) {
+        return m_users[userId].username;
+    }
+    if (!fallback.isEmpty()) return fallback;
+    return userId.isEmpty() ? QString("Unknown") : userId;
 }
 
 QColor MainWindow::getColorForName(const QString& name) {
@@ -1141,12 +1503,7 @@ QIcon MainWindow::getAvatar(const QString& name, const QString& urlIn) {
         return generateGenericAvatar(name);
     }
 
-    QString fullUrl = urlIn;
-    if (fullUrl.startsWith("/")) {
-        fullUrl = API_BASE_URL + fullUrl;
-    } else if (!fullUrl.startsWith("http://") && !fullUrl.startsWith("https://")) {
-        fullUrl = API_BASE_URL + "/" + fullUrl;
-    }
+    QString fullUrl = normalizeAvatarUrl(urlIn);
 
     if (m_avatarCache.contains(fullUrl)) {
         return QIcon(m_avatarCache[fullUrl]);
@@ -1276,7 +1633,7 @@ void MainWindow::onContactSelected(QListWidgetItem* item) {
     } else {
         m_currentChatId = potentialChatId;
         m_highlightedMessageId.clear();
-        m_chatTitle->setText(item->text());
+        m_chatTitle->setText(resolveUserDisplayName(userId, item->text()));
         m_chatList->clear();
     }
 }
@@ -1337,12 +1694,9 @@ void MainWindow::addMessageBubble(const Message& msg, bool appendStretch, bool a
     Q_UNUSED(animate);
 
     bool isMe = (msg.senderId == m_client->currentUserId());
-    QString senderName = "Unknown";
-    QString avatarUrl = "";
-    if (m_users.contains(msg.senderId)) {
-        senderName = m_users[msg.senderId].username;
-        avatarUrl = m_users[msg.senderId].avatarUrl;
-    }
+    QString senderName = resolveUserDisplayName(msg.senderId, "Unknown");
+    QString avatarUrl = m_contacts.contains(msg.senderId) ? m_contacts[msg.senderId].avatarUrl
+                                                           : normalizeAvatarUrl(m_users.value(msg.senderId).avatarUrl);
 
     QString displayText = msg.text;
     QString trimmed = displayText.trimmed();
@@ -1398,10 +1752,7 @@ void MainWindow::addMessageBubble(const Message& msg, bool appendStretch, bool a
     }
 
     if (!isMe) {
-        QString fullUrl = avatarUrl;
-        if (fullUrl.startsWith("/")) {
-            fullUrl = API_BASE_URL + fullUrl;
-        }
+        QString fullUrl = normalizeAvatarUrl(avatarUrl);
         item->setData(AvatarUrlRole, fullUrl);
         item->setIcon(getAvatar(senderName, fullUrl));
     }
@@ -1409,12 +1760,9 @@ void MainWindow::addMessageBubble(const Message& msg, bool appendStretch, bool a
 
 void MainWindow::prependMessageBubble(const Message& msg) {
     bool isMe = (msg.senderId == m_client->currentUserId());
-    QString senderName = "Unknown";
-    QString avatarUrl = "";
-    if (m_users.contains(msg.senderId)) {
-        senderName = m_users[msg.senderId].username;
-        avatarUrl = m_users[msg.senderId].avatarUrl;
-    }
+    QString senderName = resolveUserDisplayName(msg.senderId, "Unknown");
+    QString avatarUrl = m_contacts.contains(msg.senderId) ? m_contacts[msg.senderId].avatarUrl
+                                                           : normalizeAvatarUrl(m_users.value(msg.senderId).avatarUrl);
 
     QString displayText = msg.text;
     QString trimmed = displayText.trimmed();
@@ -1469,10 +1817,7 @@ void MainWindow::prependMessageBubble(const Message& msg) {
     }
 
     if (!isMe) {
-        QString fullUrl = avatarUrl;
-        if (fullUrl.startsWith("/")) {
-            fullUrl = API_BASE_URL + fullUrl;
-        }
+        QString fullUrl = normalizeAvatarUrl(avatarUrl);
         item->setData(AvatarUrlRole, fullUrl);
         item->setIcon(getAvatar(senderName, fullUrl));
     }
@@ -1757,10 +2102,7 @@ void MainWindow::onReplyToMessage() {
     m_replyingToMessageId = messageId;
     m_replyingToText = messageText;
     
-    QString senderName = "Unknown";
-    if (m_users.contains(replyMsg->senderId)) {
-        senderName = m_users[replyMsg->senderId].username;
-    }
+    QString senderName = resolveUserDisplayName(replyMsg->senderId, "Unknown");
     m_replyingToSender = senderName;
 
     QString preview = messageText.length() > 50 
@@ -1976,13 +2318,9 @@ void MainWindow::showNotificationForMessage(const Message& msg)
     }
 
     // 1. Resolve Sender Name and Avatar
-    QString senderName = "Unknown";
-    QString avatarUrl;
-    
-    if (m_users.contains(msg.senderId)) {
-        senderName = m_users[msg.senderId].username;
-        avatarUrl = m_users[msg.senderId].avatarUrl;
-    }
+    QString senderName = resolveUserDisplayName(msg.senderId, "Unknown");
+    QString avatarUrl = m_contacts.contains(msg.senderId) ? m_contacts[msg.senderId].avatarUrl
+                                                           : normalizeAvatarUrl(m_users.value(msg.senderId).avatarUrl);
 
     // 2. Resolve Chat Name and Title Format
     QString title;
