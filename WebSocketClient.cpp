@@ -292,6 +292,10 @@ void WebSocketClient::handleLoginSuccess(const QJsonObject& data) {
     QJsonObject userObj = data["user"].toObject();
     m_currentUser.userId = userObj["userId"].toString();
     m_currentUser.username = userObj["username"].toString();
+    m_currentUser.displayName = userObj.value("displayName").toString();
+    if (m_currentUser.displayName.isEmpty()) m_currentUser.displayName = userObj.value("name").toString();
+    m_currentUser.handle = userObj.value("handle").toString();
+    m_currentUser.bio = userObj.value("bio").toString();
     m_currentUser.avatarUrl = userObj["avatarUrl"].toString();
 
     m_token = data["token"].toString();
@@ -451,6 +455,10 @@ void WebSocketClient::handleUserListUpdate(const QJsonObject& data) {
         User u;
         u.userId = uObj["userId"].toString();
         u.username = uObj["username"].toString();
+        u.displayName = uObj.value("displayName").toString();
+        u.alias = uObj.value("alias").toString();
+        u.handle = uObj.value("handle").toString();
+        u.bio = uObj.value("bio").toString();
         u.avatarUrl = uObj["avatarUrl"].toString();
         users.push_back(u);
     }
